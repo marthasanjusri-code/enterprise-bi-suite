@@ -1,0 +1,8 @@
+# SQL Server backups (too large, downloaded from Microsoft)
+*.bak
+
+# Excel temporary lock files
+~$*
+
+# Personal learning notes
+notes/
