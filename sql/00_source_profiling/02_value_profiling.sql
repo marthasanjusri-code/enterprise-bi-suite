@@ -109,6 +109,13 @@ GO
 -- Code lists: product attributes, person type, pay frequency, vendor rating
 -- =====================================================================
 
+-- Result (29 Oct 2026): ProductLine null 226, M 91, R 100, S 35, T 52.
+-- Class null 257, H 82, L 97, M 68. 0 products have DiscontinuedDate; 98 have SellEndDate.
+-- PersonType IN 18,484, SC 753, GC 289, EM 273, VC 156, SP 17 (EM + SP = 290 employees).
+-- PayFrequency 1: 180 rows, rate 6.50-15.00; 2: 136 rows, rate 8.62-125.50.
+-- CreditRating 1: 84, 2: 9, 3: 7, 4: 2, 5: 2 (104 vendors).
+-- Code meanings are confirmed from column descriptions (see end of file).
+
 -- Columns are nchar(2); cast before ISNULL so '(null)' is not cut to '(n'.
 SELECT 'ProductLine' AS attribute, ISNULL(CAST(ProductLine AS nvarchar(10)), N'(null)') AS value, COUNT(*) AS row_count
 FROM Production.Product GROUP BY ProductLine
@@ -152,6 +159,9 @@ GO
 USE AdventureWorksDW2025;
 GO
 
+-- Result (29 Oct 2026): 14 units. 9 leaf units match sales territories
+-- (5 US divisions, Canada, France, Germany, Australia). No unit for United Kingdom.
+-- Units use USD, CAD, EUR or AUD.
 -- 14 rows. Needed to map finance units to sales regions.
 SELECT  o.OrganizationKey,
         o.ParentOrganizationKey,
@@ -166,6 +176,10 @@ FROM dbo.DimAccount
 GROUP BY Operator, ValueType
 ORDER BY accounts DESC;
 
+-- Result (29 Oct 2026): Operator '+' 86, '-' 7, '~' 6 accounts (4 of them Units).
+
+-- Result (29 Oct 2026): Actual 29 Dec 2010 to 28 Dec 2013 (34,563 rows),
+-- Budget 29 Dec 2010 to 29 Nov 2011 (4,846 rows). Does NOT overlap sales (2022-2025).
 -- Does finance cover the same years as sales?
 SELECT  s.ScenarioName,
         MIN(f.Date) AS first_date,
@@ -182,6 +196,8 @@ GO
 -- Inventory snapshot (DW): product mapping and date range
 -- =====================================================================
 
+-- Result (29 Oct 2026): 606 DW product keys map to all 504 OLTP products.
+-- Snapshot runs 28 Dec 2010 to 30 Jun 2014. Does NOT overlap sales (2022-2025).
 -- Every DW product key should map to an OLTP product via ProductNumber.
 SELECT  COUNT(DISTINCT f.ProductKey) AS dw_products_in_snapshot,
         COUNT(DISTINCT p.ProductID)  AS matched_oltp_products,
@@ -191,4 +207,52 @@ FROM AdventureWorksDW2025.dbo.FactProductInventory f
 JOIN AdventureWorksDW2025.dbo.DimProduct dp ON dp.ProductKey = f.ProductKey
 LEFT JOIN AdventureWorks2025.Production.Product p
        ON p.ProductNumber = dp.ProductAlternateKey;
+GO
+
+
+-- =====================================================================
+-- Date offset between DW and OLTP (same orders, different dates?)
+-- =====================================================================
+
+-- DW finance and inventory dates are 2010-2014; OLTP sales are 2022-2025.
+-- Match the same orders by SalesOrderNumber and measure the date gap.
+-- One single offset value = DW dates can be shifted safely to align.
+SELECT  'Internet' AS channel,
+        DATEDIFF(day, f.OrderDate, h.OrderDate) AS day_offset,
+        COUNT(*)                                AS order_lines
+FROM AdventureWorksDW2025.dbo.FactInternetSales f
+JOIN AdventureWorks2025.Sales.SalesOrderHeader h
+  ON h.SalesOrderNumber = f.SalesOrderNumber
+GROUP BY DATEDIFF(day, f.OrderDate, h.OrderDate)
+UNION ALL
+SELECT  'Reseller',
+        DATEDIFF(day, f.OrderDate, h.OrderDate),
+        COUNT(*)
+FROM AdventureWorksDW2025.dbo.FactResellerSales f
+JOIN AdventureWorks2025.Sales.SalesOrderHeader h
+  ON h.SalesOrderNumber = f.SalesOrderNumber
+GROUP BY DATEDIFF(day, f.OrderDate, h.OrderDate)
+ORDER BY channel, order_lines DESC;
+GO
+
+
+-- =====================================================================
+-- Official meaning of code columns (column descriptions in the source)
+-- =====================================================================
+
+-- AdventureWorks documents its columns as extended properties (MS_Description).
+USE AdventureWorks2025;
+GO
+
+SELECT  OBJECT_SCHEMA_NAME(ep.major_id) + '.' + OBJECT_NAME(ep.major_id) AS table_name,
+        c.name                                                        AS column_name,
+        CAST(ep.value AS nvarchar(500))                               AS description
+FROM sys.extended_properties ep
+JOIN sys.columns c ON c.object_id = ep.major_id
+                  AND c.column_id = ep.minor_id
+WHERE ep.name = 'MS_Description'
+  AND ep.class = 1
+  AND c.name IN ('ProductLine', 'Class', 'Style', 'PersonType',
+                 'PayFrequency', 'CreditRating', 'Status', 'OnlineOrderFlag')
+ORDER BY table_name, column_name;
 GO
