@@ -256,3 +256,143 @@ WHERE ep.name = 'MS_Description'
                  'PayFrequency', 'CreditRating', 'Status', 'OnlineOrderFlag')
 ORDER BY table_name, column_name;
 GO
+
+-- =====================================================================
+-- HR dates and employee status
+-- =====================================================================
+
+USE AdventureWorks2025;
+GO
+
+SELECT  MIN(HireDate)                                   AS first_hire,
+        MAX(HireDate)                                   AS last_hire,
+        COUNT(*)                                        AS employees,
+        SUM(CASE WHEN CurrentFlag = 1 THEN 1 ELSE 0 END) AS current_employees
+FROM HumanResources.Employee;
+
+SELECT  MIN(StartDate)                                  AS first_dept_start,
+        MAX(StartDate)                                  AS last_dept_start,
+        COUNT(EndDate)                                  AS rows_with_end_date
+FROM HumanResources.EmployeeDepartmentHistory;
+
+SELECT  MIN(RateChangeDate) AS first_rate_change,
+        MAX(RateChangeDate) AS last_rate_change
+FROM HumanResources.EmployeePayHistory;
+
+-- Latest stock snapshot date per source, for the two inventory facts
+SELECT  MAX(ModifiedDate) AS oltp_inventory_last_modified
+FROM Production.ProductInventory;
+GO
+
+-- =====================================================================
+-- Timeline audit: which tables were moved to 2022-2025?
+-- =====================================================================
+
+-- Sales were shifted to 2022-2025; HR was not. Check every date we use.
+USE AdventureWorks2025;
+GO
+
+SELECT 'Sales.SalesOrderHeader.OrderDate' AS date_column,
+       CAST(MIN(OrderDate) AS date) AS first_date, CAST(MAX(OrderDate) AS date) AS last_date
+FROM Sales.SalesOrderHeader
+UNION ALL
+SELECT 'Sales.SalesPersonQuotaHistory.QuotaDate', CAST(MIN(QuotaDate) AS date), CAST(MAX(QuotaDate) AS date)
+FROM Sales.SalesPersonQuotaHistory
+UNION ALL
+SELECT 'Sales.SalesTerritoryHistory.StartDate', CAST(MIN(StartDate) AS date), CAST(MAX(StartDate) AS date)
+FROM Sales.SalesTerritoryHistory
+UNION ALL
+SELECT 'Sales.SpecialOffer.StartDate', CAST(MIN(StartDate) AS date), CAST(MAX(StartDate) AS date)
+FROM Sales.SpecialOffer
+UNION ALL
+SELECT 'Purchasing.PurchaseOrderHeader.OrderDate', CAST(MIN(OrderDate) AS date), CAST(MAX(OrderDate) AS date)
+FROM Purchasing.PurchaseOrderHeader
+UNION ALL
+SELECT 'Production.WorkOrder.StartDate', CAST(MIN(StartDate) AS date), CAST(MAX(StartDate) AS date)
+FROM Production.WorkOrder
+UNION ALL
+SELECT 'Production.ProductCostHistory.StartDate', CAST(MIN(StartDate) AS date), CAST(MAX(StartDate) AS date)
+FROM Production.ProductCostHistory
+UNION ALL
+SELECT 'Production.Product.SellStartDate', CAST(MIN(SellStartDate) AS date), CAST(MAX(SellStartDate) AS date)
+FROM Production.Product
+UNION ALL
+SELECT 'Production.TransactionHistory.TransactionDate', CAST(MIN(TransactionDate) AS date), CAST(MAX(TransactionDate) AS date)
+FROM Production.TransactionHistory
+UNION ALL
+SELECT 'HumanResources.Employee.HireDate', MIN(HireDate), MAX(HireDate)
+FROM HumanResources.Employee
+UNION ALL
+SELECT 'HumanResources.Employee.BirthDate', MIN(BirthDate), MAX(BirthDate)
+FROM HumanResources.Employee
+ORDER BY first_date;
+GO
+
+-- Is OLTP HR on the same old timeline as the DW? Compare hire dates
+-- for the same employee (matched by LoginID). One single offset of 0
+-- means HR needs the same +4,170 day shift as the DW tables.
+SELECT  DATEDIFF(day, d.HireDate, e.HireDate) AS day_offset,
+        COUNT(*)                              AS employees
+FROM AdventureWorks2025.HumanResources.Employee e
+JOIN AdventureWorksDW2025.dbo.DimEmployee d
+  ON d.LoginID = e.LoginID
+ AND d.CurrentFlag = 1
+GROUP BY DATEDIFF(day, d.HireDate, e.HireDate);
+GO
+
+-- =====================================================================
+-- Test: HR shift of +4,017 days (DW->sales 4,170 minus DW->HR 153)
+-- =====================================================================
+
+USE AdventureWorks2025;
+GO
+
+-- Test 1: after the shift, every salesperson should be hired
+-- on or before their first territory, first quota and first order.
+SELECT  s.BusinessEntityID,
+        DATEADD(day, 4017, e.HireDate) AS shifted_hire_date,
+        (SELECT MIN(t.StartDate) FROM Sales.SalesTerritoryHistory t
+          WHERE t.BusinessEntityID = s.BusinessEntityID)             AS first_territory_start,
+        (SELECT MIN(q.QuotaDate) FROM Sales.SalesPersonQuotaHistory q
+          WHERE q.BusinessEntityID = s.BusinessEntityID)             AS first_quota,
+        (SELECT MIN(h.OrderDate) FROM Sales.SalesOrderHeader h
+          WHERE h.SalesPersonID = s.BusinessEntityID)                AS first_order
+FROM Sales.SalesPerson s
+JOIN HumanResources.Employee e ON e.BusinessEntityID = s.BusinessEntityID
+ORDER BY shifted_hire_date;
+
+-- Test 2: age at hire, with and without shifting BirthDate.
+SELECT  'shift hire only'        AS option_name,
+        MIN(DATEDIFF(year, BirthDate, DATEADD(day, 4017, HireDate))) AS min_age_at_hire,
+        MAX(DATEDIFF(year, BirthDate, DATEADD(day, 4017, HireDate))) AS max_age_at_hire,
+        MIN(DATEDIFF(year, BirthDate, '2025-06-29'))                 AS min_age_at_data_end,
+        MAX(DATEDIFF(year, BirthDate, '2025-06-29'))                 AS max_age_at_data_end
+FROM HumanResources.Employee
+UNION ALL
+SELECT  'shift hire and birth',
+        MIN(DATEDIFF(year, BirthDate, HireDate)),
+        MAX(DATEDIFF(year, BirthDate, HireDate)),
+        MIN(DATEDIFF(year, DATEADD(day, 4017, BirthDate), '2025-06-29')),
+        MAX(DATEDIFF(year, DATEADD(day, 4017, BirthDate), '2025-06-29'))
+FROM HumanResources.Employee;
+GO
+
+-- Result (01 Nov 2026): Test 1: 16 of 17 salespeople hired on or before
+-- their first territory, quota and order. 11 match to the exact day.
+-- Exception: salesperson 284, first quota one month before hire.
+-- Test 2: shifting hire and birth gives ages 18-60 at hire, 23-63 at data end.
+-- Decision: shift all HR dates, including BirthDate, by +4,017 days.
+
+-- Confirm the salesperson 284 anomaly exists in the original DW data
+-- (DW EmployeeKey 293). Both dates move by the same offset, so the
+-- order cannot be caused by our shift.
+-- Result (01 Nov 2026): 1 row, hire 2012-04-30, first quota 2012-03-30.
+-- Anomaly is in the source. Kept as is and documented.
+SELECT  d.EmployeeKey,
+        d.HireDate,
+        MIN(q.[Date]) AS first_quota
+FROM AdventureWorksDW2025.dbo.DimEmployee d
+JOIN AdventureWorksDW2025.dbo.FactSalesQuota q ON q.EmployeeKey = d.EmployeeKey
+GROUP BY d.EmployeeKey, d.HireDate
+HAVING MIN(q.[Date]) < d.HireDate;
+GO
