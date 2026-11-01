@@ -369,23 +369,149 @@ GROUP BY h.SalesPersonID, t.[Group]
 ORDER BY h.SalesPersonID;
 GO
 
--- Results (01 Nov 2026): 7 unmatched quota rows.
---   284: 1 row, quota 2023-08-30 before territory start 2023-09-30
---        (same source anomaly as the quota before hire).
---   280: 6 rows, 2023-11-30 to 2025-02-28. Left Northwest (territory 1)
---        on 2023-09-29; 284 took Northwest on 2023-09-30.
---   Orders by region group: 274 North America 48, 285 Pacific 16,
---   287 Europe 39. These three are regional sales managers.
+-- Result (01 Nov 2026): 280 sold in Northwest 2022-05-30 to 2025-04-30
+-- (95 orders) despite territory history ending 2023-09-29. 284 sold in
+-- Northwest from 2023-09-30 (140 orders). Both quotas belong to Northwest.
+-- Territory rule: covering period > nearest period > region from orders.
 
--- Where did 280 and 284 sell, and when?
-SELECT  h.SalesPersonID,
-        t.Name                         AS territory,
-        CAST(MIN(h.OrderDate) AS date) AS first_order,
-        CAST(MAX(h.OrderDate) AS date) AS last_order,
-        COUNT(*)                       AS orders
-FROM Sales.SalesOrderHeader h
-JOIN Sales.SalesTerritory t ON t.TerritoryID = h.TerritoryID
-WHERE h.SalesPersonID IN (280, 284)
-GROUP BY h.SalesPersonID, t.Name
-ORDER BY h.SalesPersonID, first_order;
+
+-- =====================================================================
+-- fact_finance: grain, dates, hierarchy levels (DW source)
+-- =====================================================================
+
+USE AdventureWorksDW2025;
 GO
+
+-- 1. Grain: is each date + organization + department group + scenario
+--    + account combination unique?
+SELECT  COUNT(*) AS finance_rows,
+        COUNT(DISTINCT CONCAT(DateKey, '|', OrganizationKey, '|', DepartmentGroupKey,
+                              '|', ScenarioKey, '|', AccountKey)) AS distinct_combinations
+FROM dbo.FactFinance;
+
+-- 2. Dates: one date per month? After the +4,170 day shift, does any
+--    month get two dates or lose its date?
+SELECT  CAST([Date] AS date)                     AS source_date,
+        CAST(DATEADD(day, 4170, [Date]) AS date) AS shifted_date,
+        COUNT(*)                                 AS finance_rows
+FROM dbo.FactFinance
+GROUP BY [Date]
+ORDER BY [Date];
+
+SELECT  COUNT(*)                                     AS shifted_months,
+        SUM(CASE WHEN dates_in_month > 1 THEN 1 ELSE 0 END) AS months_with_two_dates
+FROM (
+    SELECT  YEAR(DATEADD(day, 4170, [Date]))  AS yr,
+            MONTH(DATEADD(day, 4170, [Date])) AS mo,
+            COUNT(DISTINCT [Date])            AS dates_in_month
+    FROM dbo.FactFinance
+    GROUP BY YEAR(DATEADD(day, 4170, [Date])), MONTH(DATEADD(day, 4170, [Date]))
+) m;
+
+-- 3. Account hierarchy with fact rows per account. If parent accounts
+--    also hold amounts, adding up the hierarchy would double count.
+WITH h AS (
+    SELECT  AccountKey, ParentAccountKey, AccountType, Operator, ValueType,
+            0 AS lvl,
+            CAST(AccountDescription AS nvarchar(200))  AS account_name,
+            CAST(RIGHT('0000' + CAST(AccountKey AS varchar(10)), 4) AS varchar(400)) AS sort_path
+    FROM dbo.DimAccount
+    WHERE ParentAccountKey IS NULL
+    UNION ALL
+    SELECT  a.AccountKey, a.ParentAccountKey, a.AccountType, a.Operator, a.ValueType,
+            h.lvl + 1,
+            CAST(a.AccountDescription AS nvarchar(200)),
+            CAST(h.sort_path + '.' + RIGHT('0000' + CAST(a.AccountKey AS varchar(10)), 4) AS varchar(400))
+    FROM dbo.DimAccount a
+    JOIN h ON a.ParentAccountKey = h.AccountKey
+)
+SELECT  h.lvl,
+        REPLICATE('    ', h.lvl) + h.account_name                    AS account,
+        h.AccountKey,
+        h.AccountType,
+        h.Operator,
+        h.ValueType,
+        (SELECT COUNT(*) FROM dbo.DimAccount c
+          WHERE c.ParentAccountKey = h.AccountKey)                   AS child_accounts,
+        (SELECT COUNT(*) FROM dbo.FactFinance f
+          WHERE f.AccountKey = h.AccountKey)                         AS fact_rows
+FROM h
+ORDER BY h.sort_path;
+
+-- 4. Organizations and department groups: do parent levels hold rows?
+SELECT  'organization'  AS dimension,
+        o.OrganizationKey AS member_key,
+        o.OrganizationName AS member_name,
+        (SELECT COUNT(*) FROM dbo.DimOrganization c
+          WHERE c.ParentOrganizationKey = o.OrganizationKey) AS children,
+        (SELECT COUNT(*) FROM dbo.FactFinance f
+          WHERE f.OrganizationKey = o.OrganizationKey)       AS fact_rows
+FROM dbo.DimOrganization o
+UNION ALL
+SELECT  'department group',
+        g.DepartmentGroupKey,
+        g.DepartmentGroupName,
+        (SELECT COUNT(*) FROM dbo.DimDepartmentGroup c
+          WHERE c.ParentDepartmentGroupKey = g.DepartmentGroupKey),
+        (SELECT COUNT(*) FROM dbo.FactFinance f
+          WHERE f.DepartmentGroupKey = g.DepartmentGroupKey)
+FROM dbo.DimDepartmentGroup g
+ORDER BY dimension, member_key;
+GO
+
+-- Results (01 Nov 2026):
+--   1. 39,409 rows = 39,409 distinct combinations. Grain confirmed.
+--   3. 99 accounts. Every account with children has 0 fact rows; amounts
+--      sit only on leaf accounts. Tree: Balance Sheet (Assets; Liabilities
+--      and Owners Equity, operator '-'), Net Income > Operating Profit >
+--      Gross Margin > Net Sales, Total Cost of Sales ('-'), Operating
+--      Expenses ('-'), Other Income and Expense, Taxes ('-'), and
+--      Statistical Accounts (Headcount, Units, Square Footage: Units).
+--   4. Organizations: only the 9 leaf units hold rows.
+--      Department groups: Corporate (parent of the other 6) holds 8,843
+--      rows itself. Needs a check: own amounts or totals of children?
+ 
+ 
+-- =====================================================================
+-- fact_finance: Corporate department group (parent with its own rows)
+-- =====================================================================
+ 
+-- A. Which kind of accounts does each department group hold?
+--    (Top-level account: Balance Sheet, Net Income or Statistical.)
+WITH h AS (
+    SELECT AccountKey, AccountKey AS top_key
+    FROM dbo.DimAccount WHERE ParentAccountKey IS NULL
+    UNION ALL
+    SELECT a.AccountKey, h.top_key
+    FROM dbo.DimAccount a JOIN h ON a.ParentAccountKey = h.AccountKey
+)
+SELECT  g.DepartmentGroupName,
+        t.AccountDescription AS top_level_account,
+        COUNT(*)             AS finance_rows
+FROM dbo.FactFinance f
+JOIN dbo.DimDepartmentGroup g ON g.DepartmentGroupKey = f.DepartmentGroupKey
+JOIN h                        ON h.AccountKey         = f.AccountKey
+JOIN dbo.DimAccount t         ON t.AccountKey         = h.top_key
+GROUP BY g.DepartmentGroupName, t.AccountDescription
+ORDER BY g.DepartmentGroupName, t.AccountDescription;
+ 
+-- B. Does any Corporate row repeat a child group's row for the same
+--    date, organization, scenario and account? If yes, compare amounts:
+--    equal to the children's total = a subtotal (double counting risk).
+WITH corp AS (
+    SELECT DateKey, OrganizationKey, ScenarioKey, AccountKey, Amount
+    FROM dbo.FactFinance WHERE DepartmentGroupKey = 1
+),
+kids AS (
+    SELECT DateKey, OrganizationKey, ScenarioKey, AccountKey, SUM(Amount) AS amount
+    FROM dbo.FactFinance WHERE DepartmentGroupKey <> 1
+    GROUP BY DateKey, OrganizationKey, ScenarioKey, AccountKey
+)
+SELECT  COUNT(*)                                                       AS overlapping_combinations,
+        SUM(CASE WHEN ABS(c.Amount - k.amount) < 0.01 THEN 1 ELSE 0 END) AS corporate_equals_children
+FROM corp c
+JOIN kids k
+  ON k.DateKey = c.DateKey AND k.OrganizationKey = c.OrganizationKey
+ AND k.ScenarioKey = c.ScenarioKey AND k.AccountKey = c.AccountKey;
+GO
+ 
