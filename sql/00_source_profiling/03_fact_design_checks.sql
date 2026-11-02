@@ -866,3 +866,109 @@ JOIN dbo.DimCurrency c     ON c.CurrencyKey     = o.CurrencyKey
 GROUP BY o.OrganizationName, c.CurrencyAlternateKey
 ORDER BY org_currency, o.OrganizationName;
 GO
+-- Results (02 Nov 2026):
+--   A. Every finance row has a monthly rate (0 rows without rate for AUD,
+--      CAD, EUR; USD also has rate rows, but USD is always converted at 1.0).
+--   B. After conversion, salaries per head: Australia 4,303, Canada 4,905,
+--      France 3,145, Germany 2,411. All four now inside the USD range
+--      (2,320-5,011); before, Australia and Canada were far above it.
+--      Rent per square foot: Canada 0.055 and France 0.054 inside the USD
+--      range; Australia fell from 0.224 to 0.118 but stays above it;
+--      Germany 0.017 was below the range before and after (rate near 1).
+-- Decision: finance amounts are in LOCAL currency. Convert to USD with
+-- the database's rates, looked up on the ORIGINAL (DW timeline) date.
+-- Keep amount_local, currency_code, exchange_rate and amount_usd.
+
+
+-- =====================================================================
+-- fact_purchase: one row per purchase order line (draft)
+-- =====================================================================
+
+USE AdventureWorks2025;
+GO
+
+-- 1. Grain: PurchaseOrderDetailID unique?
+SELECT  COUNT(*)                              AS po_lines,
+        COUNT(DISTINCT PurchaseOrderDetailID) AS distinct_line_ids,
+        COUNT(DISTINCT PurchaseOrderID)       AS purchase_orders
+FROM Purchasing.PurchaseOrderDetail;
+
+-- 2. Money: line total = qty x price, lines add up to SubTotal,
+--    and TotalDue = SubTotal + TaxAmt + Freight?
+SELECT  (SELECT COUNT(*) FROM Purchasing.PurchaseOrderDetail
+          WHERE ABS(LineTotal - OrderQty * UnitPrice) > 0.01)             AS lines_where_line_total_differs,
+        (SELECT COUNT(*) FROM Purchasing.PurchaseOrderHeader h
+           JOIN (SELECT PurchaseOrderID, SUM(LineTotal) AS s
+                 FROM Purchasing.PurchaseOrderDetail GROUP BY PurchaseOrderID) d
+             ON d.PurchaseOrderID = h.PurchaseOrderID
+          WHERE ABS(h.SubTotal - d.s) > 0.01)                               AS orders_where_subtotal_differs,
+        (SELECT COUNT(*) FROM Purchasing.PurchaseOrderHeader
+          WHERE ABS(TotalDue - (SubTotal + TaxAmt + Freight)) > 0.01)       AS orders_where_total_due_differs,
+        (SELECT COUNT(*) FROM Purchasing.PurchaseOrderHeader h
+          WHERE NOT EXISTS (SELECT 1 FROM Purchasing.PurchaseOrderDetail d
+                            WHERE d.PurchaseOrderID = h.PurchaseOrderID))   AS orders_without_lines;
+
+-- 3. Quantities: received <= ordered, stocked = received - rejected?
+SELECT  SUM(CASE WHEN ReceivedQty > OrderQty                    THEN 1 ELSE 0 END) AS received_more_than_ordered,
+        SUM(CASE WHEN ReceivedQty < OrderQty                    THEN 1 ELSE 0 END) AS received_less_than_ordered,
+        SUM(CASE WHEN StockedQty <> ReceivedQty - RejectedQty   THEN 1 ELSE 0 END) AS stocked_not_received_minus_rejected,
+        SUM(CASE WHEN RejectedQty > 0                           THEN 1 ELSE 0 END) AS lines_with_rejects
+FROM Purchasing.PurchaseOrderDetail;
+
+-- 4. Status vs quantities and money: does a Rejected or Pending order
+--    still show received goods?
+SELECT  h.Status,
+        dbo.ufnGetPurchaseOrderStatusText(h.Status) AS status_text,
+        COUNT(*)                                    AS po_lines,
+        SUM(d.OrderQty)                             AS ordered_qty,
+        SUM(d.ReceivedQty)                          AS received_qty,
+        SUM(d.RejectedQty)                          AS rejected_qty,
+        CAST(SUM(d.LineTotal) AS decimal(18,2))     AS line_total
+FROM Purchasing.PurchaseOrderDetail d
+JOIN Purchasing.PurchaseOrderHeader h ON h.PurchaseOrderID = d.PurchaseOrderID
+GROUP BY h.Status
+ORDER BY h.Status;
+
+-- 5. Dates: ship date (header) vs order date and line due date.
+SELECT  SUM(CASE WHEN h.ShipDate IS NULL         THEN 1 ELSE 0 END) AS lines_missing_ship_date,
+        SUM(CASE WHEN h.ShipDate < h.OrderDate   THEN 1 ELSE 0 END) AS shipped_before_order,
+        SUM(CASE WHEN d.DueDate  < h.OrderDate   THEN 1 ELSE 0 END) AS due_before_order,
+        SUM(CASE WHEN h.ShipDate > d.DueDate     THEN 1 ELSE 0 END) AS shipped_after_due,
+        MIN(DATEDIFF(day, h.OrderDate, h.ShipDate)) AS min_days_to_ship,
+        MAX(DATEDIFF(day, h.OrderDate, h.ShipDate)) AS max_days_to_ship,
+        MIN(DATEDIFF(day, h.OrderDate, d.DueDate))  AS min_days_to_due,
+        MAX(DATEDIFF(day, h.OrderDate, d.DueDate))  AS max_days_to_due
+FROM Purchasing.PurchaseOrderDetail d
+JOIN Purchasing.PurchaseOrderHeader h ON h.PurchaseOrderID = d.PurchaseOrderID;
+
+-- 6. Vendor lead time: does every PO line's product + vendor pair exist
+--    in ProductVendor? And what lead times are there?
+SELECT  SUM(CASE WHEN pv.ProductID IS NULL THEN 1 ELSE 0 END) AS lines_without_product_vendor,
+        COUNT(*)                                             AS po_lines,
+        MIN(pv.AverageLeadTime)                              AS min_lead_days,
+        MAX(pv.AverageLeadTime)                              AS max_lead_days
+FROM Purchasing.PurchaseOrderDetail d
+JOIN Purchasing.PurchaseOrderHeader h ON h.PurchaseOrderID = d.PurchaseOrderID
+LEFT JOIN Purchasing.ProductVendor pv
+       ON pv.ProductID = d.ProductID
+      AND pv.BusinessEntityID = h.VendorID;
+
+-- 7. Buyers: who places purchase orders?
+SELECT  e.JobTitle,
+        COUNT(DISTINCT h.EmployeeID) AS employees,
+        COUNT(*)                     AS purchase_orders
+FROM Purchasing.PurchaseOrderHeader h
+JOIN HumanResources.Employee e ON e.BusinessEntityID = h.EmployeeID
+GROUP BY e.JobTitle
+ORDER BY purchase_orders DESC;
+
+-- 8. Vendors: how many have orders, and are any inactive or not preferred?
+SELECT  v.ActiveFlag,
+        v.PreferredVendorStatus,
+        COUNT(DISTINCT v.BusinessEntityID)  AS vendors,
+        COUNT(DISTINCT h.PurchaseOrderID)   AS purchase_orders
+FROM Purchasing.Vendor v
+LEFT JOIN Purchasing.PurchaseOrderHeader h ON h.VendorID = v.BusinessEntityID
+GROUP BY v.ActiveFlag, v.PreferredVendorStatus
+ORDER BY v.ActiveFlag DESC, v.PreferredVendorStatus DESC;
+GO
