@@ -972,3 +972,89 @@ LEFT JOIN Purchasing.PurchaseOrderHeader h ON h.VendorID = v.BusinessEntityID
 GROUP BY v.ActiveFlag, v.PreferredVendorStatus
 ORDER BY v.ActiveFlag DESC, v.PreferredVendorStatus DESC;
 GO
+-- Results 1-4 (02 Nov 2026):
+--   1. 8,845 lines = 8,845 distinct IDs, 4,012 orders. Grain confirmed.
+--   2. 0 / 0 / 0 / 0. LineTotal = qty x price; lines add up to SubTotal;
+--      TotalDue = SubTotal + TaxAmt + Freight; every order has lines.
+--   3. 0 received more than ordered; 380 lines received less (partial
+--      deliveries); StockedQty = ReceivedQty - RejectedQty always;
+--      563 lines have rejects.
+--   4. By status (lines / ordered / received / rejected / line total):
+--      Pending  477 / 125,801 / 124,537 /  1,510 /  3,505,773
+--      Approved  57 /  96,255 /  95,965 /      0 /  2,164,339
+--      Rejected 142 /  46,747 /  46,746 / 46,745 /  1,301,826
+--      Complete 8,169 / 2,079,834 / 2,060,051 / 24,445 / 56,820,057
+--   Reading: status does not track delivery. Pending and Approved orders
+--   already received about 99% of goods. "Rejected" orders were received
+--   and then almost fully rejected (quality), not cancelled.
+--   Proposal: value KPIs from quantities, not from status:
+--     ordered value  = line_total
+--     received value = received_qty x unit_price
+--     accepted value = stocked_qty  x unit_price  (= purchase spend)
+--     rejected value = rejected_qty x unit_price
+--   Status stays for order counts by stage (P2).
+-- Results (02 Nov 2026):
+--   1. 8,845 lines = 8,845 distinct IDs, 4,012 orders. Grain confirmed.
+--   2. 0 / 0 / 0 / 0. Line totals, SubTotal, TotalDue all consistent.
+--   3. 0 received more than ordered; 380 lines short-delivered;
+--      stocked = received - rejected on every line; 563 lines with rejects.
+--   4. Pending: 477 lines, 124,537 of 125,801 received. Approved: 57 lines,
+--      95,965 of 96,255 received. Rejected: 142 lines, 46,746 received and
+--      46,745 rejected. Complete: 8,169 lines.
+--      Status does not mean "not delivered": Pending and Approved orders
+--      already hold received goods; "Rejected" = goods rejected on receipt.
+--   5. No missing ship date, none shipped before order. 7 lines due before
+--      the order date, 7 shipped after due. Days to ship 9-25.
+--   6. Every line has a product + vendor lead time (10-120 days).
+--   7. Buyers 9 (3,089 POs), Purchasing Assistants 2 (763), Purchasing
+--      Manager 1 (160).
+--   8. 93 active preferred vendors (3,456 POs), 7 active not preferred
+--      (353), 4 inactive (203). Inactive vendors have history: keep them.
+
+
+-- =====================================================================
+-- fact_purchase: anomaly lines and value measures
+-- =====================================================================
+
+-- A. Are the 7 "due before order" lines the same as the 7 "shipped after
+--    due" lines? Show them.
+SELECT  h.PurchaseOrderID,
+        d.PurchaseOrderDetailID,
+        CAST(h.OrderDate AS date) AS order_date,
+        CAST(d.DueDate   AS date) AS due_date,
+        CAST(h.ShipDate  AS date) AS ship_date,
+        h.Status,
+        d.OrderQty, d.ReceivedQty, d.RejectedQty
+FROM Purchasing.PurchaseOrderDetail d
+JOIN Purchasing.PurchaseOrderHeader h ON h.PurchaseOrderID = d.PurchaseOrderID
+WHERE d.DueDate < h.OrderDate
+   OR h.ShipDate > d.DueDate
+ORDER BY h.PurchaseOrderID, d.PurchaseOrderDetailID;
+
+-- B. Value measures by status: ordered value (line total), accepted value
+--    (stocked qty x price), rejected value (rejected qty x price), and
+--    short-delivered value ((ordered - received) x price).
+SELECT  h.Status,
+        dbo.ufnGetPurchaseOrderStatusText(h.Status)                         AS status_text,
+        CAST(SUM(d.LineTotal)                                AS decimal(18,2)) AS ordered_value,
+        CAST(SUM(d.StockedQty  * d.UnitPrice)                AS decimal(18,2)) AS accepted_value,
+        CAST(SUM(d.RejectedQty * d.UnitPrice)                AS decimal(18,2)) AS rejected_value,
+        CAST(SUM((d.OrderQty - d.ReceivedQty) * d.UnitPrice) AS decimal(18,2)) AS short_delivered_value
+FROM Purchasing.PurchaseOrderDetail d
+JOIN Purchasing.PurchaseOrderHeader h ON h.PurchaseOrderID = d.PurchaseOrderID
+GROUP BY h.Status
+ORDER BY h.Status;
+
+-- C. Freight per order: if allocated to lines by line total share, does it
+--    add back to the header freight exactly?
+WITH alloc AS (
+    SELECT  d.PurchaseOrderID,
+            d.LineTotal / NULLIF(SUM(d.LineTotal) OVER (PARTITION BY d.PurchaseOrderID), 0)
+              * h.Freight AS freight_allocated
+    FROM Purchasing.PurchaseOrderDetail d
+    JOIN Purchasing.PurchaseOrderHeader h ON h.PurchaseOrderID = d.PurchaseOrderID
+)
+SELECT  CAST(SUM(a.freight_allocated) AS decimal(18,2))                      AS allocated_freight,
+        CAST((SELECT SUM(Freight) FROM Purchasing.PurchaseOrderHeader) AS decimal(18,2)) AS header_freight
+FROM alloc a;
+GO
