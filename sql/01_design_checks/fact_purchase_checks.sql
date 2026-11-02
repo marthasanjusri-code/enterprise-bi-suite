@@ -214,3 +214,54 @@ SELECT  CAST(SUM(a.freight_allocated) AS decimal(18,2))                         
           WHERE SubTotal = 0 AND Freight > 0)                                            AS zero_value_orders_with_freight
 FROM alloc a;
 GO
+-- Result (02 Nov 2026): with decimals, allocated freight 1,583,976.71 vs
+-- header 1,583,978.23 (gap 1.52, down from 170.53). 0 zero-value orders
+-- with freight. Cause = rounding in the division, not missing orders.
+-- Decision: allocate by line-total share rounded to cents, and give each
+-- order's rounding remainder to its largest line, so the allocation adds
+-- back exactly by construction. Test after build: 0 orders where the sum
+-- of allocated freight differs from header freight.
+
+
+-- =====================================================================
+-- fact_purchase: checks behind the KPI definitions
+-- =====================================================================
+
+-- E. Freight is usually driven by weight. Could we allocate by weight
+--    instead of value? Only if purchased products have a weight.
+SELECT  COUNT(*)                                             AS po_lines,
+        SUM(CASE WHEN p.Weight IS NULL THEN 1 ELSE 0 END)    AS lines_without_weight,
+        COUNT(DISTINCT d.ProductID)                          AS products_bought,
+        COUNT(DISTINCT CASE WHEN p.Weight IS NULL THEN d.ProductID END) AS products_without_weight
+FROM Purchasing.PurchaseOrderDetail d
+JOIN Production.Product p ON p.ProductID = d.ProductID;
+
+-- F. Fill rate should only judge lines whose due date has passed.
+--    How many lines are still "open" at the end of the purchase data,
+--    and are the short deliveries among them?
+-- (First version used a subquery inside SUM, which SQL Server does not
+-- allow: Msg 130. The data end date is now joined once instead.)
+WITH data_end AS (
+    SELECT MAX(ShipDate) AS last_date FROM Purchasing.PurchaseOrderHeader
+)
+SELECT  CAST(e.last_date AS date)                                       AS data_end,
+        SUM(CASE WHEN d.DueDate > e.last_date THEN 1 ELSE 0 END)        AS lines_not_yet_due,
+        SUM(CASE WHEN d.ReceivedQty < d.OrderQty
+                  AND d.DueDate > e.last_date THEN 1 ELSE 0 END)        AS short_lines_not_yet_due,
+        SUM(CASE WHEN d.ReceivedQty < d.OrderQty THEN 1 ELSE 0 END)     AS short_lines_total
+FROM Purchasing.PurchaseOrderDetail d
+CROSS JOIN data_end e
+GROUP BY e.last_date;
+
+-- G. Line-level OTIF (on time, in full, no rejects): does it vary?
+SELECT  COUNT(*) AS po_lines,
+        SUM(CASE WHEN h.ShipDate <= d.DueDate                     THEN 1 ELSE 0 END) AS on_time_lines,
+        SUM(CASE WHEN d.ReceivedQty = d.OrderQty                  THEN 1 ELSE 0 END) AS in_full_lines,
+        SUM(CASE WHEN d.RejectedQty = 0                           THEN 1 ELSE 0 END) AS no_reject_lines,
+        SUM(CASE WHEN h.ShipDate <= d.DueDate
+                  AND d.ReceivedQty = d.OrderQty
+                  AND d.RejectedQty = 0                           THEN 1 ELSE 0 END) AS otif_lines
+FROM Purchasing.PurchaseOrderDetail d
+JOIN Purchasing.PurchaseOrderHeader h ON h.PurchaseOrderID = d.PurchaseOrderID
+WHERE d.DueDate >= h.OrderDate;
+GO
