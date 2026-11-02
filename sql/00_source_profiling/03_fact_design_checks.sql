@@ -369,6 +369,27 @@ GROUP BY h.SalesPersonID, t.[Group]
 ORDER BY h.SalesPersonID;
 GO
 
+-- Results (01 Nov 2026): 7 unmatched quota rows.
+--   284: 1 row, quota 2023-08-30 before territory start 2023-09-30
+--        (same source anomaly as the quota before hire).
+--   280: 6 rows, 2023-11-30 to 2025-02-28. Left Northwest (territory 1)
+--        on 2023-09-29; 284 took Northwest on 2023-09-30.
+--   Orders by region group: 274 North America 48, 285 Pacific 16,
+--   287 Europe 39. These three are regional sales managers.
+
+-- Where did 280 and 284 sell, and when?
+SELECT  h.SalesPersonID,
+        t.Name                         AS territory,
+        CAST(MIN(h.OrderDate) AS date) AS first_order,
+        CAST(MAX(h.OrderDate) AS date) AS last_order,
+        COUNT(*)                       AS orders
+FROM Sales.SalesOrderHeader h
+JOIN Sales.SalesTerritory t ON t.TerritoryID = h.TerritoryID
+WHERE h.SalesPersonID IN (280, 284)
+GROUP BY h.SalesPersonID, t.Name
+ORDER BY h.SalesPersonID, first_order;
+GO
+
 -- Result (01 Nov 2026): 280 sold in Northwest 2022-05-30 to 2025-04-30
 -- (95 orders) despite territory history ending 2023-09-29. 284 sold in
 -- Northwest from 2023-09-30 (140 orders). Both quotas belong to Northwest.
@@ -470,12 +491,12 @@ GO
 --   4. Organizations: only the 9 leaf units hold rows.
 --      Department groups: Corporate (parent of the other 6) holds 8,843
 --      rows itself. Needs a check: own amounts or totals of children?
- 
- 
+
+
 -- =====================================================================
 -- fact_finance: Corporate department group (parent with its own rows)
 -- =====================================================================
- 
+
 -- A. Which kind of accounts does each department group hold?
 --    (Top-level account: Balance Sheet, Net Income or Statistical.)
 WITH h AS (
@@ -494,7 +515,7 @@ JOIN h                        ON h.AccountKey         = f.AccountKey
 JOIN dbo.DimAccount t         ON t.AccountKey         = h.top_key
 GROUP BY g.DepartmentGroupName, t.AccountDescription
 ORDER BY g.DepartmentGroupName, t.AccountDescription;
- 
+
 -- B. Does any Corporate row repeat a child group's row for the same
 --    date, organization, scenario and account? If yes, compare amounts:
 --    equal to the children's total = a subtotal (double counting risk).
@@ -514,4 +535,69 @@ JOIN kids k
   ON k.DateKey = c.DateKey AND k.OrganizationKey = c.OrganizationKey
  AND k.ScenarioKey = c.ScenarioKey AND k.AccountKey = c.AccountKey;
 GO
- 
+
+-- Results (01 Nov 2026):
+--   A. Corporate holds Net Income 8,567 and Statistical 276 rows, no
+--      Balance Sheet. Balance Sheet sits in Sales and Marketing (7,776),
+--      Executive General and Administration (276), Inventory Management (72).
+--   B. All 8,843 Corporate rows overlap a child row; only 342 equal the
+--      children's total.
+
+-- C. Are the 342 equal rows just zeros? And is Corporate usually larger
+--    than its children (which would suggest "own + children")?
+-- Result (01 Nov 2026): 342 equal (not zero), 4,023 Corporate larger,
+-- 4,478 Corporate smaller. Corporate is its own data, not a subtotal and
+-- not "own + children". Keep all rows; model as "Corporate (direct)".
+WITH corp AS (
+    SELECT DateKey, OrganizationKey, ScenarioKey, AccountKey, Amount
+    FROM dbo.FactFinance WHERE DepartmentGroupKey = 1
+),
+kids AS (
+    SELECT DateKey, OrganizationKey, ScenarioKey, AccountKey, SUM(Amount) AS amount
+    FROM dbo.FactFinance WHERE DepartmentGroupKey <> 1
+    GROUP BY DateKey, OrganizationKey, ScenarioKey, AccountKey
+)
+SELECT  CASE WHEN ABS(c.Amount - k.amount) < 0.01 AND c.Amount = 0 THEN 'equal, both zero'
+             WHEN ABS(c.Amount - k.amount) < 0.01                   THEN 'equal, not zero'
+             WHEN c.Amount > k.amount                               THEN 'corporate larger'
+             ELSE                                                        'corporate smaller'
+        END      AS comparison,
+        COUNT(*) AS combinations
+FROM corp c
+JOIN kids k
+  ON k.DateKey = c.DateKey AND k.OrganizationKey = c.OrganizationKey
+ AND k.ScenarioKey = c.ScenarioKey AND k.AccountKey = c.AccountKey
+GROUP BY CASE WHEN ABS(c.Amount - k.amount) < 0.01 AND c.Amount = 0 THEN 'equal, both zero'
+              WHEN ABS(c.Amount - k.amount) < 0.01                   THEN 'equal, not zero'
+              WHEN c.Amount > k.amount                               THEN 'corporate larger'
+              ELSE                                                        'corporate smaller'
+         END;
+GO
+
+-- D. The 342 equal combinations: how many child rows, which accounts?
+-- Result (01 Nov 2026): spread over 22 accounts; 230 match one child row,
+-- 112 match the sum of two children (rules out simple copies). 0.9% of
+-- finance rows. Decision: keep; report the count in a data quality check;
+-- in a real company, confirm with the finance team.
+WITH corp AS (
+    SELECT DateKey, OrganizationKey, ScenarioKey, AccountKey, Amount
+    FROM dbo.FactFinance WHERE DepartmentGroupKey = 1
+),
+kids AS (
+    SELECT DateKey, OrganizationKey, ScenarioKey, AccountKey,
+           SUM(Amount) AS amount, COUNT(*) AS child_rows
+    FROM dbo.FactFinance WHERE DepartmentGroupKey <> 1
+    GROUP BY DateKey, OrganizationKey, ScenarioKey, AccountKey
+)
+SELECT  a.AccountDescription,
+        k.child_rows,
+        COUNT(*) AS combinations
+FROM corp c
+JOIN kids k
+  ON k.DateKey = c.DateKey AND k.OrganizationKey = c.OrganizationKey
+ AND k.ScenarioKey = c.ScenarioKey AND k.AccountKey = c.AccountKey
+JOIN dbo.DimAccount a ON a.AccountKey = c.AccountKey
+WHERE ABS(c.Amount - k.amount) < 0.01
+GROUP BY a.AccountDescription, k.child_rows
+ORDER BY combinations DESC;
+GO
