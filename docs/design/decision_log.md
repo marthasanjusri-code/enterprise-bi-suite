@@ -173,7 +173,15 @@ in this log changes one of them (for example D49, D53), this log takes precedenc
 | D73 | A user missing from the mapping table sees no data. | Secure by default. | Step 2.6 |
 | D74 | Security is demonstrated with "View as" in Power BI Desktop; the .pbix file itself is not protected. | Row-level security is enforced when content is shared through the Power BI Service. | Step 2.6 |
 
-## 8. Documentation
+## 8. Pipeline
+
+| ID | Decision | Reason | Evidence |
+|---|---|---|---|
+| D76 | Facts are fully reloaded on every run; dimensions are merged (update existing, insert new). | Volumes are small (largest source table 121,317 rows), so a full reload is fast and never misses updates or deletes; merged dimensions keep surrogate keys stable. Incremental loading by `ModifiedDate` is the next step if volumes grow. | Architecture, Step 2.7 |
+| D77 | Data quality checks run on every load; errors stop the job, warnings are logged and reported. | Half-loaded or broken data never reaches the report; known anomalies stay visible. | Architecture, Step 2.7 |
+| D78 | The SQL Server Agent job runs nightly at 02:00. | Outside working hours. | Architecture, Step 2.7 |
+
+## 9. Documentation
 
 | ID | Decision | Reason | Evidence |
 |---|---|---|---|
