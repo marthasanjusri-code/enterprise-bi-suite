@@ -194,7 +194,6 @@ SELECT  FinishedGoodsFlag,
 FROM products
 GROUP BY FinishedGoodsFlag;
 GO
-
 -- Result (03 Nov 2026), products still on sale:
 --   Components: 209, all with inventory rows. Available stock: 98 reorder
 --   now, 24 below minimum. On-hand stock: 2 reorder now, 53 below minimum.
@@ -211,3 +210,50 @@ GO
 --   - Active products with no inventory row get one zero-quantity row
 --     (location = "No stock location"), so they cannot disappear from the
 --     reorder list.
+
+
+-- =====================================================================
+-- fact_inventory_current: can purchased internal parts be valued at
+-- their last purchase price?
+-- =====================================================================
+
+-- E. dim_product checks showed 182 internal parts are bought from vendors
+--    but have StandardCost = 0. Their last purchase price could value the
+--    stock ("last purchase price" costing). How much stock would that add?
+WITH last_price AS (
+    SELECT  d.ProductID,
+            d.UnitPrice,
+            ROW_NUMBER() OVER (PARTITION BY d.ProductID
+                               ORDER BY h.OrderDate DESC, d.PurchaseOrderDetailID DESC) AS rn
+    FROM Purchasing.PurchaseOrderDetail d
+    JOIN Purchasing.PurchaseOrderHeader h ON h.PurchaseOrderID = d.PurchaseOrderID
+),
+stock AS (
+    SELECT  p.FinishedGoodsFlag,
+            i.Quantity,
+            CASE WHEN p.StandardCost > 0           THEN 'standard cost'
+                 WHEN lp.UnitPrice IS NOT NULL      THEN 'last purchase price'
+                 ELSE                                    'no cost' END AS cost_source,
+            CASE WHEN p.StandardCost > 0 THEN p.StandardCost ELSE lp.UnitPrice END AS unit_cost
+    FROM Production.ProductInventory i
+    JOIN Production.Product p ON p.ProductID = i.ProductID
+    LEFT JOIN last_price lp   ON lp.ProductID = i.ProductID AND lp.rn = 1
+)
+SELECT  FinishedGoodsFlag,
+        cost_source,
+        SUM(CAST(Quantity AS bigint))                     AS units,
+        CAST(SUM(Quantity * unit_cost) AS decimal(18,2))  AS stock_value
+FROM stock
+GROUP BY FinishedGoodsFlag, cost_source
+ORDER BY FinishedGoodsFlag, cost_source;
+GO
+-- Result (03 Nov 2026):
+--   Internal parts: last purchase price 228,992 units (8.43 M), standard
+--   cost 7,348 units (0.87 M), no cost 21,816 units.
+--   Finished goods: standard cost 77,818 units (19.23 M).
+--   Internal-part units with a cost rise from 2.8% to 91.5%; all stock
+--   from 2.8% / 100% to 93.5% of units overall (314,158 of 335,974).
+-- Decision (updates the earlier cost rule): unit_cost = standard cost when
+-- above 0, else last purchase price, else NULL. cost_source records which
+-- one was used. Weighted average cost would be closer to accounting
+-- practice; last purchase price is the documented, simpler choice.

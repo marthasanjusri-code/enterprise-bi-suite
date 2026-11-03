@@ -33,3 +33,14 @@ SELECT  SalesTerritoryKey,
 FROM AdventureWorksDW2025.dbo.DimSalesTerritory
 ORDER BY SalesTerritoryKey;
 GO
+-- Results (03 Nov 2026):
+--   1. 10 territories: Europe (France, Germany, United Kingdom), North
+--      America (Canada + 5 US territories), Pacific (Australia).
+--   2. The 11th DW row is key 11, alternate key 0, all names "NA": an
+--      unknown member, as expected. Closes the open item.
+-- Decisions:
+--   - Special keys used in every dimension: -1 = "Unknown" (data missing),
+--     -2 = "Not applicable" (no value can exist, e.g. online orders have no
+--     salesperson, work orders without scrap have no scrap reason).
+--   - 3 region-level rows (North America, Europe, Pacific) with their own
+--     keys, is_region_level = 1, country "Multiple".

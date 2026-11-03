@@ -83,3 +83,25 @@ FROM Sales.SalesOrderDetail d
 JOIN Sales.SalesOrderHeader h ON h.SalesOrderID = d.SalesOrderID
 JOIN Production.Product p     ON p.ProductID    = d.ProductID;
 GO
+-- Results (03 Nov 2026):
+--   1. 504 products, numbers and names unique. 209 without subcategory, and
+--      0 of them are finished goods: they are exactly the 209 internal
+--      parts. 200 with zero cost and 200 with zero price. 98 sell-ended.
+--   2. Accessories 12 subcategories / 29 products, Bikes 3 / 97,
+--      Clothing 8 / 35, Components 14 / 134 (= 295 finished goods).
+--      Note: the category "Components" holds SELLABLE parts; the 209
+--      internal parts (FinishedGoodsFlag = 0) are a different group.
+--   3. No color 248, size 293, product line 226, class 257, style 293.
+--   4. Internal parts: 0 sold, 182 purchased, 27 made, 209 stocked.
+--      Finished goods: 266 sold, 83 purchased, 211 made, 223 stocked,
+--      1 used nowhere.
+--   5. 0 lines before sell start; 64 lines on 25 products after sell end:
+--      the same count as the 64 lines with no cost period (cost history
+--      ended when the products were discontinued). Build test to confirm.
+-- Decisions:
+--   - Internal parts get category and subcategory "Internal parts", so they
+--     are not confused with the sellable "Components" category.
+--   - Missing attributes shown as "N/A"; codes shown as words (R = Road).
+--   - standard_cost and list_price: 0 is stored as NULL (unknown).
+--   - Type 1 (current values only); cost history lives in the facts.
+--   - The unused product is kept (harmless, keeps the list complete).
