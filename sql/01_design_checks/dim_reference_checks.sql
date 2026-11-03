@@ -102,3 +102,36 @@ LEFT JOIN HumanResources.EmployeeDepartmentHistory h
 GROUP BY s.ShiftID, s.Name, s.StartTime, s.EndTime
 ORDER BY s.ShiftID;
 GO
+-- Results (03 Nov 2026):
+--   1. 16 offers. Offer 1 "No Discount" covers 115,884 lines, so every
+--      sales line already has a real promotion: no "Not applicable" row
+--      needed. 4 offers never used (6, 10, 12, 15), including both
+--      "Customer" offers: online customers never received a promotion.
+--      Some offer names carry old years ("Sport Helmet Discount-2002").
+--   2. 2,151 of 121,317 lines (1.8%) have a line discount different from
+--      their offer's discount.
+--   3. Sales use only 2 ship methods (XRQ - TRUCK GROUND 27,659 orders =
+--      online, CARGO TRANSPORT 5 3,806 = reseller); purchases use all 5.
+--   4. 104 vendors, names unique, all with exactly one address.
+--   5. All 104 vendors are in the United States: vendor country has no
+--      variation, so it is not added. BusinessEntityAddress stays unused.
+--   6. Day 176, Evening 62, Night 52 employees (= 290). Night runs 23:00
+--      to 07:00 (crosses midnight; display only).
+
+
+-- 2b. Which offers have lines with a different discount, and in which
+--     direction? A "No Discount" line with a discount would mislabel
+--     discounted sales.
+SELECT  o.SpecialOfferID,
+        o.Description,
+        o.DiscountPct                                         AS offer_discount,
+        COUNT(*)                                              AS lines_differing,
+        MIN(d.UnitPriceDiscount)                              AS min_line_discount,
+        MAX(d.UnitPriceDiscount)                              AS max_line_discount,
+        CAST(SUM(d.UnitPrice * d.OrderQty * d.UnitPriceDiscount) AS decimal(18,2)) AS discount_amount
+FROM Sales.SalesOrderDetail d
+JOIN Sales.SpecialOffer o ON o.SpecialOfferID = d.SpecialOfferID
+WHERE d.UnitPriceDiscount <> o.DiscountPct
+GROUP BY o.SpecialOfferID, o.Description, o.DiscountPct
+ORDER BY lines_differing DESC;
+GO
