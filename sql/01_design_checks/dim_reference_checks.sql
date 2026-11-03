@@ -135,3 +135,17 @@ WHERE d.UnitPriceDiscount <> o.DiscountPct
 GROUP BY o.SpecialOfferID, o.Description, o.DiscountPct
 ORDER BY lines_differing DESC;
 GO
+-- Result (03 Nov 2026), check 2b: all 2,151 differing lines have a line
+-- discount of 0 while their offer has a discount: Volume Discount 11 to 14
+-- (2,118 lines), Touring-3000 Promotion (20), Touring-1000 Promotion (13).
+-- No "No Discount" line carries a discount.
+-- Decisions:
+--   - Discount amounts always come from the line discount (already the
+--     fact rule), so revenue and discounts are correct.
+--   - Discount by offer shows the ACTUAL discount; a data quality check
+--     reports lines on a discounted offer that received no discount.
+--   - dim_promotion: name, type, category, offer discount %, start, end,
+--     was_used; special row -1 only (offer 1 "No Discount" covers the rest).
+--   - dim_ship_method: name, base charge, rate. dim_vendor: name, credit
+--     rating as words, preferred, active (no country: all US).
+--   - dim_shift: name, start time, end time.
