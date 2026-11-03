@@ -53,7 +53,7 @@ One SQL Server Agent job runs five steps. Each step is a stored procedure, so an
 
 ```mermaid
 flowchart TD
-    A["1. etl.start_batch<br/>new row in etl.load_log"] --> B["2. etl.load_staging<br/>truncate and reload stg tables"]
+    A["1. etl.start_batch<br/>new row in etl.load_batch"] --> B["2. etl.load_staging<br/>truncate and reload stg tables"]
     B --> C["3. etl.load_dimensions<br/>merge: update existing, insert new;<br/>surrogate keys stay stable"]
     C --> D["4. etl.load_facts<br/>truncate and reload facts with all rules"]
     D --> E["5. etl.run_quality_checks<br/>results to etl.dq_result"]
@@ -68,8 +68,8 @@ flowchart TD
 | Failures | Each step logs its result; an error stops the job (D77) | Half-loaded data never reaches the report. |
 | Schedule | Nightly at 02:00 (D78) | Outside working hours. |
 
-`etl.load_log` holds one row per run and step: batch id, step, start and end time, rows read,
-rows written, status, error message.
+`etl.load_batch` holds one row per run (start, end, status, who started it). `etl.load_log` holds
+one row per step: batch id, step, start and end time, rows read, rows written, status, error message.
 
 ---
 
