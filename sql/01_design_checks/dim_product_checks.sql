@@ -1,0 +1,85 @@
+/*
+  dim_product_checks.sql
+  Design checks for dw.dim_product: keys, category structure, missing
+  attributes, costs and prices, which facts use each product, and sales
+  outside the selling period.
+
+  Source: AdventureWorks2025. Read-only.
+  Each check is followed or preceded by its result and the decision it supports.
+*/
+
+-- =====================================================================
+-- dim_product: one row per product (draft)
+-- =====================================================================
+
+USE AdventureWorks2025;
+GO
+
+-- 1. Keys and basic gaps: are ProductNumber and Name unique? How many
+--    products have no subcategory, zero cost, zero price, or a sell end?
+SELECT  COUNT(*)                                                     AS products,
+        COUNT(DISTINCT ProductNumber)                                AS distinct_numbers,
+        COUNT(DISTINCT Name)                                         AS distinct_names,
+        SUM(CASE WHEN ProductSubcategoryID IS NULL THEN 1 ELSE 0 END) AS no_subcategory,
+        SUM(CASE WHEN ProductSubcategoryID IS NULL
+                  AND FinishedGoodsFlag = 1 THEN 1 ELSE 0 END)       AS finished_without_subcategory,
+        SUM(CASE WHEN StandardCost = 0 THEN 1 ELSE 0 END)            AS zero_cost,
+        SUM(CASE WHEN ListPrice    = 0 THEN 1 ELSE 0 END)            AS zero_price,
+        SUM(CASE WHEN SellEndDate IS NOT NULL THEN 1 ELSE 0 END)     AS sell_ended
+FROM Production.Product;
+
+-- 2. Category structure: categories, subcategories and products.
+SELECT  c.Name                                  AS category,
+        COUNT(DISTINCT s.ProductSubcategoryID)  AS subcategories,
+        COUNT(p.ProductID)                      AS products
+FROM Production.ProductCategory c
+JOIN Production.ProductSubcategory s ON s.ProductCategoryID = c.ProductCategoryID
+LEFT JOIN Production.Product p       ON p.ProductSubcategoryID = s.ProductSubcategoryID
+GROUP BY c.Name
+ORDER BY c.Name;
+
+-- 3. Missing descriptive attributes (shown as "N/A" if kept).
+SELECT  SUM(CASE WHEN Color       IS NULL THEN 1 ELSE 0 END) AS no_color,
+        SUM(CASE WHEN Size        IS NULL THEN 1 ELSE 0 END) AS no_size,
+        SUM(CASE WHEN ProductLine IS NULL THEN 1 ELSE 0 END) AS no_product_line,
+        SUM(CASE WHEN Class       IS NULL THEN 1 ELSE 0 END) AS no_class,
+        SUM(CASE WHEN Style       IS NULL THEN 1 ELSE 0 END) AS no_style
+FROM Production.Product;
+
+-- 4. Which facts use each product? Products used nowhere could be
+--    hidden from slicers.
+WITH usage AS (
+    SELECT  p.ProductID,
+            p.FinishedGoodsFlag,
+            CASE WHEN EXISTS (SELECT 1 FROM Sales.SalesOrderDetail d
+                              WHERE d.ProductID = p.ProductID) THEN 1 ELSE 0 END AS sold,
+            CASE WHEN EXISTS (SELECT 1 FROM Purchasing.PurchaseOrderDetail d
+                              WHERE d.ProductID = p.ProductID) THEN 1 ELSE 0 END AS purchased,
+            CASE WHEN EXISTS (SELECT 1 FROM Production.WorkOrder w
+                              WHERE w.ProductID = p.ProductID) THEN 1 ELSE 0 END AS made,
+            CASE WHEN EXISTS (SELECT 1 FROM Production.ProductInventory i
+                              WHERE i.ProductID = p.ProductID) THEN 1 ELSE 0 END AS stocked
+    FROM Production.Product p
+)
+SELECT  FinishedGoodsFlag,
+        COUNT(*)        AS products,
+        SUM(sold)       AS sold,
+        SUM(purchased)  AS purchased,
+        SUM(made)       AS made,
+        SUM(stocked)    AS stocked,
+        SUM(CASE WHEN sold + purchased + made + stocked = 0 THEN 1 ELSE 0 END) AS used_nowhere
+FROM usage
+GROUP BY FinishedGoodsFlag;
+
+-- 5. Sales outside the selling period (before SellStartDate or after
+--    SellEndDate)?
+SELECT  SUM(CASE WHEN h.OrderDate < p.SellStartDate THEN 1 ELSE 0 END)  AS lines_before_sell_start,
+        SUM(CASE WHEN p.SellEndDate IS NOT NULL
+                  AND h.OrderDate > p.SellEndDate THEN 1 ELSE 0 END)    AS lines_after_sell_end,
+        COUNT(DISTINCT CASE WHEN p.SellEndDate IS NOT NULL
+                             AND h.OrderDate > p.SellEndDate
+                            THEN p.ProductID END)                       AS products_sold_after_end
+FROM Sales.SalesOrderDetail d
+JOIN Sales.SalesOrderHeader h ON h.SalesOrderID = d.SalesOrderID
+JOIN Production.Product p     ON p.ProductID    = d.ProductID;
+GO
