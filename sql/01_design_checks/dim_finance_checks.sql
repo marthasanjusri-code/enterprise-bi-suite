@@ -193,3 +193,24 @@ ORDER BY a.AccountKey;
 
 DROP TABLE #account_signs;
 GO
+
+-- Results (03 Nov 2026), check 3b:
+--   By shifted month, assets = liabilities + equity in all 36 months from
+--   May 2022 to April 2025, with no doubled months. May 2025 has NO
+--   balance sheet rows (income statement only).
+--   Cash, Trade Receivables, Land, Buildings, Machinery and Office
+--   Furniture: 276 rows each, 0 negative, 0 zero. Land and buildings are
+--   positive every month: the rows are month-end BALANCES, not movements.
+-- Decisions:
+--   - Balance sheet measures use the closing balance of the last month in
+--     the selection that HAS balance sheet rows (latest = April 2025).
+--   - dim_account: account code and name, account type, operator, value
+--     type, statement (Income statement / Balance sheet / Statistical),
+--     sign_to_net_income (+1 / -1 / 0), levels 1-6 flattened with the leaf
+--     name repeated in empty levels, sort order from the tree path.
+--   - dim_organization: levels 1-3 flattened (leaf name repeated),
+--     region_group from level 1 (North America / Europe / Pacific),
+--     mapped sales territory for leaf units, currency code.
+--   - dim_finance_department_group: level 1 "Corporate", level 2 = group
+--     name, plus member "Corporate (direct)" for Corporate's own rows.
+--   - dim_scenario: Actual, Budget, Forecast (kept, no rows yet).
