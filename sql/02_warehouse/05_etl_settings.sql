@@ -5,6 +5,7 @@
     hr_date_shift_days       +4,017 days for HR dates            (D21)
     dw_date_shift_days       +4,170 days for DW (finance) dates  (D20)
     fiscal_year_start_month  7 = fiscal year starts 1 July       (D23)
+    hr_as_of_date            2025-10-31, date for current HR values (D91)
   Safe to re-run: the table is created once; values are set to the ones below.
 */
 
@@ -23,7 +24,8 @@ WITH v (setting_name, setting_value, description) AS (
     SELECT * FROM (VALUES
         ('hr_date_shift_days',      '4017', N'Days added to HR dates to align them with the sales timeline (D21).'),
         ('dw_date_shift_days',      '4170', N'Days added to AdventureWorksDW dates to align them with the sales timeline (D20).'),
-        ('fiscal_year_start_month', '7',    N'First month of the fiscal year; the fiscal year is named by the year it ends (D23).')
+        ('fiscal_year_start_month', '7',    N'First month of the fiscal year; the fiscal year is named by the year it ends (D23).'),
+        ('hr_as_of_date',           '2025-10-31', N'Date for current HR values such as age band: last month-end of the headcount snapshot (D58, D91).')
     ) x (setting_name, setting_value, description)
 )
 UPDATE s
@@ -38,7 +40,8 @@ WITH v (setting_name, setting_value, description) AS (
     SELECT * FROM (VALUES
         ('hr_date_shift_days',      '4017', N'Days added to HR dates to align them with the sales timeline (D21).'),
         ('dw_date_shift_days',      '4170', N'Days added to AdventureWorksDW dates to align them with the sales timeline (D20).'),
-        ('fiscal_year_start_month', '7',    N'First month of the fiscal year; the fiscal year is named by the year it ends (D23).')
+        ('fiscal_year_start_month', '7',    N'First month of the fiscal year; the fiscal year is named by the year it ends (D23).'),
+        ('hr_as_of_date',           '2025-10-31', N'Date for current HR values such as age band: last month-end of the headcount snapshot (D58, D91).')
     ) x (setting_name, setting_value, description)
 )
 INSERT INTO etl.setting (setting_name, setting_value, description)
@@ -62,6 +65,25 @@ BEGIN
     IF @value IS NULL
     BEGIN
         DECLARE @msg nvarchar(400) = N'Setting "' + @setting_name + N'" is missing or not a whole number in etl.setting.';
+        THROW 50001, @msg, 1;
+    END;
+END;
+GO
+
+-- Returns a date setting (yyyy-mm-dd), or raises an error if it is missing.
+CREATE OR ALTER PROCEDURE etl.get_setting_date
+    @setting_name varchar(100),
+    @value        date OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT @value = TRY_CONVERT(date, setting_value, 23)
+    FROM etl.setting
+    WHERE setting_name = @setting_name;
+
+    IF @value IS NULL
+    BEGIN
+        DECLARE @msg nvarchar(400) = N'Setting "' + @setting_name + N'" is missing or not a date (yyyy-mm-dd) in etl.setting.';
         THROW 50001, @msg, 1;
     END;
 END;
