@@ -33,6 +33,8 @@ FROM c;
 GO
 
 -- 2. Rules. Expected: every row PASS.
+--    (A first version expected the CEO's manager to be -2. That made the
+--    special row -2 point to itself, a loop. The root now has no parent.)
 WITH r (rule_checked, expected_value, actual_value) AS (
     SELECT 'Employees missing in employee HR', '0',
            CAST((SELECT COUNT(*) FROM dw.dim_employee e WHERE e.row_type = 'Source'
@@ -45,16 +47,19 @@ WITH r (rule_checked, expected_value, actual_value) AS (
     SELECT 'Employees with a real manager', '289',
            CAST((SELECT COUNT(*) FROM dw.dim_employee WHERE row_type = 'Source' AND manager_key > 0) AS varchar(20))
     UNION ALL
-    SELECT 'Manager of the Chief Executive Officer', '-2',
-           CAST((SELECT manager_key FROM dw.dim_employee WHERE job_title = N'Chief Executive Officer') AS varchar(20))
+    SELECT 'Manager of the Chief Executive Officer (root)', 'none',
+           ISNULL(CAST((SELECT manager_key FROM dw.dim_employee WHERE job_title = N'Chief Executive Officer') AS varchar(20)), 'none')
     UNION ALL
     SELECT 'Level-1 employees reporting to the CEO', '6',
            CAST((SELECT COUNT(*) FROM dw.dim_employee e
                  JOIN dw.dim_employee m ON m.employee_key = e.manager_key
                  WHERE e.organization_level = 1 AND m.job_title = N'Chief Executive Officer') AS varchar(20))
     UNION ALL
-    SELECT 'Employees who manage themselves', '0',
+    SELECT 'Rows that point to themselves (any row)', '0',
            CAST((SELECT COUNT(*) FROM dw.dim_employee WHERE manager_key = employee_key) AS varchar(20))
+    UNION ALL
+    SELECT 'Rows without a parent (CEO + 2 special rows)', '3',
+           CAST((SELECT COUNT(*) FROM dw.dim_employee WHERE manager_key IS NULL) AS varchar(20))
     UNION ALL
     SELECT 'Employees with unknown manager (-1)', '0',
            CAST((SELECT COUNT(*) FROM dw.dim_employee WHERE row_type = 'Source' AND manager_key = -1) AS varchar(20))

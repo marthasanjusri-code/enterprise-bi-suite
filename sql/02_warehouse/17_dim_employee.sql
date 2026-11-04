@@ -11,8 +11,12 @@
     - manager_key, loaded in a second pass once all employees exist (D90):
         parent path found      -> that employee
         parent path is "/"     -> the top employee (the one with no node)
-        top employee           -> -2 (Not applicable)
+        top employee           -> NULL (no parent: root of the hierarchy)
         parent path not found  -> -1 (Unknown)
+      Special rows also have no parent (NULL). A hierarchy root must have an
+      empty parent, and no row may point to itself: Power BI's PATH function
+      fails on a loop (a first version gave the top employee -2, and row -2
+      pointed to itself).
   Special rows: -1 Unknown, -2 "No salesperson" (online orders).
   Same load pattern as the other source dimensions (D83, D84, D87).
 */
@@ -29,7 +33,7 @@ CREATE TABLE dw.dim_employee (
     employee_name             nvarchar(101) NOT NULL,
     job_title                 nvarchar(50) NOT NULL,
     organization_level        smallint NULL,
-    manager_key               int NOT NULL,
+    manager_key               int NULL,
     current_department        nvarchar(50) NOT NULL,
     current_department_group  nvarchar(50) NOT NULL,
     current_shift             nvarchar(50) NOT NULL,
@@ -39,6 +43,16 @@ CREATE TABLE dw.dim_employee (
     updated_batch_id          int NOT NULL,
     CONSTRAINT ck_dim_employee_row_type CHECK (row_type IN ('Source', 'Derived', 'Unknown', 'Not applicable'))
 );
+GO
+
+-- One-time correction for tables created by the first version:
+-- manager_key may be empty, and special rows have no parent.
+IF EXISTS (SELECT 1 FROM sys.columns
+           WHERE object_id = OBJECT_ID('dw.dim_employee') AND name = 'manager_key' AND is_nullable = 0)
+    ALTER TABLE dw.dim_employee ALTER COLUMN manager_key int NULL;
+GO
+UPDATE dw.dim_employee SET manager_key = NULL
+WHERE employee_key IN (-1, -2) AND manager_key IS NOT NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ux_dim_employee_employee_id' AND object_id = OBJECT_ID('dw.dim_employee'))
@@ -64,14 +78,14 @@ BEGIN
                                          job_title, organization_level, manager_key, current_department,
                                          current_department_group, current_shift, is_salesperson, is_buyer,
                                          inserted_batch_id, updated_batch_id)
-            VALUES (-1, NULL, 'Unknown', 0, N'Unknown', N'Unknown', NULL, -2, N'Unknown',
+            VALUES (-1, NULL, 'Unknown', 0, N'Unknown', N'Unknown', NULL, NULL, N'Unknown',
                     N'Unknown', N'Unknown', 0, 0, @batch_id, @batch_id);
         IF NOT EXISTS (SELECT 1 FROM dw.dim_employee WHERE employee_key = -2)
             INSERT INTO dw.dim_employee (employee_key, employee_id, row_type, is_in_source, employee_name,
                                          job_title, organization_level, manager_key, current_department,
                                          current_department_group, current_shift, is_salesperson, is_buyer,
                                          inserted_batch_id, updated_batch_id)
-            VALUES (-2, NULL, 'Not applicable', 0, N'No salesperson', N'Not applicable', NULL, -2,
+            VALUES (-2, NULL, 'Not applicable', 0, N'No salesperson', N'Not applicable', NULL, NULL,
                     N'Not applicable', N'Not applicable', N'Not applicable', 0, 0, @batch_id, @batch_id);
         SET IDENTITY_INSERT dw.dim_employee OFF;
 
@@ -144,7 +158,7 @@ BEGIN
         IF OBJECT_ID('tempdb..#mgr') IS NOT NULL DROP TABLE #mgr;
 
         SELECT  e.BusinessEntityID AS employee_id,
-                CASE WHEN e.OrganizationNode IS NULL OR e.OrganizationNode = N'/' THEN -2   -- top employee
+                CASE WHEN e.OrganizationNode IS NULL OR e.OrganizationNode = N'/' THEN NULL -- top employee: root
                      WHEN m.BusinessEntityID IS NOT NULL                       THEN dm.employee_key
                      WHEN e.ParentOrganizationNode = N'/' AND r.root_id IS NOT NULL THEN dr.employee_key
                      ELSE -1 END AS manager_key

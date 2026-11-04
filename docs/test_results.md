@@ -79,3 +79,23 @@ Dimensions: product, territory, customer, promotion, ship method, vendor, locati
 | 5 | Lineage | 0 rows without batch ids | 0 in all 8 | Pass |
 | 6 | Soft delete (rolled-back transaction: ship method 5 removed from staging) | Row kept with is_in_source = 0, 1 row written; restored after rollback | Inside: 6 rows, 0, 1 written. After rollback: 6 rows, 1 | Pass |
 | 7 | Re-run of all eight | 8 steps succeeded, 0 rows written | 8 / 8 / 0 | Pass |
+
+---
+
+## B3c: Employee, employee HR, department and shift dimensions
+
+**Script:** `tests/test_dim_employee.sql` | **Run:** 2026-11-04 | **Result:** 5 of 5 passed (after one fix)
+
+| # | Test | Expected | Measured | Result |
+|---|---|---|---|---|
+| 1 | Row counts | Department 17, shift 4, employee 292, employee HR 291 | As expected | Pass |
+| 2 | Rules (same keys both ways, managers, roles, departments, gender, pay type, age bands, shifted hire dates, no birth date column, special row) | 21 checks equal | 21 of 21 equal (289 with a manager, CEO is the root, 6 report to the CEO, 0 loops, 17 salespeople, 12 buyers, Production 179) | Pass |
+| 3 | Age bands on 2025-10-31 (information) | 290 employees | Under 30: 95, 30-39: 112, 40-49: 57, 50-59: 20, 60 and over: 6 | Pass |
+| 4 | Lineage | 0 rows without batch ids | 0 in all four | Pass |
+| 5 | Re-run | 4 steps succeeded, 0 rows written | 4 / 4 / 0 | Pass |
+
+Fix during testing:
+- The first run failed one rule: one row pointed to itself as manager. Confirmed by query: special
+  row -2 "No salesperson" had manager -2, and the CEO's manager was also -2, so every path up the
+  hierarchy ended in a loop (Power BI's PATH function rejects loops). The CEO and the special rows
+  now have no parent (NULL); recorded in D90.
