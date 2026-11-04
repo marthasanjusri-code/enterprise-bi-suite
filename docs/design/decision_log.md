@@ -181,7 +181,16 @@ in this log changes one of them (for example D49, D53), this log takes precedenc
 | D77 | Data quality checks run on every load; errors stop the job, warnings are logged and reported. | Half-loaded or broken data never reaches the report; known anomalies stay visible. | Architecture, Step 2.7 |
 | D78 | The SQL Server Agent job runs nightly at 02:00. | Outside working hours. | Architecture, Step 2.7 |
 
-## 9. Documentation
+## 9. Staging
+
+| ID | Decision | Reason | Evidence |
+|---|---|---|---|
+| D79 | 36 staging tables, prefixed by source: `stg.aw_<table>` (AdventureWorks2025) and `stg.awdw_<table>` (AdventureWorksDW2025). | Every staging table shows its source and cannot be confused with the `dw` schema. Traced to every fact and dimension. | `sql/02_warehouse/03_staging_tables.sql` |
+| D80 | Staging copies only the columns in use, keeps source column names and exact source types, and has no keys or constraints; every row has `batch_id` and `loaded_at`. | Raw, traceable copy that accepts source data as it is; types verified against the live source by test (194 of 194 columns match). | `tests/test_staging.sql`, test 3 |
+| D81 | From Person only employees (types EM and SP) are copied; birth date is kept in staging only; the hierarchy node is stored as text with its parent path. | Individual customer names never enter the warehouse; ages are derived from birth date, which is not exposed to Power BI. | `sql/02_warehouse/04_load_staging.sql` |
+| D82 | Staging tables are copied one after another, not in one consistent snapshot. Accepted for a nightly load of static data; a data quality check reports order lines without a header. | Snapshot isolation would require changing the source database settings. | Step B2 |
+
+## 10. Documentation
 
 | ID | Decision | Reason | Evidence |
 |---|---|---|---|

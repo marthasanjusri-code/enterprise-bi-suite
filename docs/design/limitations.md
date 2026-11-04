@@ -70,6 +70,7 @@ Kept as they are (source data is never changed on suspicion) and documented.
 | Facts are fully reloaded rather than loaded incrementally | Volumes are small | D76 |
 | Internal parts are valued at last purchase price, not weighted average cost | Simpler; weighted average needs full movement history | D53 |
 | HR data is hidden from regional managers; supply chain data (except inventory) is head-office only | The source has no region for these modules | D72 |
+| Staging tables are copied one after another, not as one consistent snapshot | Changing the source's isolation settings was out of scope; an orphan-line check covers the risk | D82 |
 
 ---
 
