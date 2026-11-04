@@ -190,7 +190,16 @@ in this log changes one of them (for example D49, D53), this log takes precedenc
 | D81 | From Person only employees (types EM and SP) are copied; birth date is kept in staging only; the hierarchy node is stored as text with its parent path. | Individual customer names never enter the warehouse; ages are derived from birth date, which is not exposed to Power BI. | `sql/02_warehouse/04_load_staging.sql` |
 | D82 | Staging tables are copied one after another, not in one consistent snapshot. Accepted for a nightly load of static data; a data quality check reports order lines without a header. | Snapshot isolation would require changing the source database settings. | Step B2 |
 
-## 10. Documentation
+## 10. Dimension loading
+
+| ID | Decision | Reason | Evidence |
+|---|---|---|---|
+| D83 | Dimensions are loaded with UPDATE (changed rows) then INSERT (new rows), not MERGE. Change detection uses NOT EXISTS ... INTERSECT, which treats NULLs as equal. | Same result as D76; MERGE has a history of bugs and edge cases in SQL Server, and two plain statements are easier to read and test. | `sql/02_warehouse/06_dim_date.sql` |
+| D84 | Every dimension row carries `inserted_batch_id` and `updated_batch_id`. | Shows when each row first appeared and last changed. | `sql/02_warehouse/06_dim_date.sql` |
+| D85 | Shared constants (HR and DW date shifts, fiscal start month) live once in `etl.setting` and are read through `etl.get_setting_int`, which fails if a value is missing. | No number typed in several procedures; one place to change. | `sql/02_warehouse/05_etl_settings.sql` |
+| D86 | `dim_date` range is calculated from staging on every run (whole years around all fact and hire dates); weekday by arithmetic (Monday = 1) and names from fixed lists, independent of server settings; dates are never deleted; no relative-date columns; the load checks compatibility level 160+ for GENERATE_SERIES. | The calendar extends itself with new data and cannot change with DATEFIRST or language settings; "current" periods depend on today, which D24 rules out. | `sql/02_warehouse/06_dim_date.sql`, `tests/test_dim_date.sql` |
+
+## 11. Documentation
 
 | ID | Decision | Reason | Evidence |
 |---|---|---|---|
