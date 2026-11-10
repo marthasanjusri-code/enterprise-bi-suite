@@ -99,3 +99,44 @@ Fix during testing:
   row -2 "No salesperson" had manager -2, and the CEO's manager was also -2, so every path up the
   hierarchy ended in a loop (Power BI's PATH function rejects loops). The CEO and the special rows
   now have no parent (NULL); recorded in D90.
+
+
+---
+
+## B3d: Finance dimensions (scenario, finance department group, organization, account)
+
+**Script:** `tests/test_dim_finance.sql` | **Run:** 2026-11-10 | **Result:** 16 of 16 passed (second run)
+
+| # | Test | Expected | Measured | Result |
+|---|---|---|---|---|
+| 1 | Rows = source + special rows | 4, 8, 15, 100 | As expected | Pass |
+| 2 | Business keys unique | 0 duplicates in all 4 | 0 in all 4 | Pass |
+| 3 | Special rows with fixed keys | -1 Unknown in all 4 | 4 of 4 | Pass |
+| 4 | Rules (scenario names, Corporate (direct), unit levels, region groups, currencies, territory map, statements, signs, profit-line leaf counts, levels, sort order, 14 units and 16 accounts in full) | 91 checks equal | 91 of 91 equal (e.g. 72 leaf accounts; signs +1: 12, -1: 36, 0: 51; net income 35 leaves, 6 added, 29 subtracted; United Kingdom is the only territory without a finance unit) | Pass |
+| 5 | Lineage | 0 rows without batch ids | 0 in all 4 | Pass |
+| 6a | Soft delete, scenario 3 (rolled back) | Inside: 4 rows, 0, 1 written; after rollback 1 | 4 / 0 / 1; 1 | Pass |
+| 6b | Soft delete, department group 7 (rolled back) | Inside: 8 rows, 0, 1 written; after rollback 1 | 8 / 0 / 1; 1 | Pass |
+| 6c | Guard: third level in department groups | Rejected, 8 rows | Rejected, 8 | Pass |
+| 6d | Soft delete, organization unit 12 (rolled back) | Inside: 15 rows, 0, 1 written; after rollback 1 | 15 / 0 / 1; 1 | Pass |
+| 6e | Guard: fifth organization level | Rejected, 15 rows | Rejected, 15 | Pass |
+| 6f | Guard: map row to a missing territory | Rejected, 15 rows | Rejected, 15 | Pass |
+| 6g | New unit not in the map | Region N/A, territory N/A, leaf; parent stays North America | N/A / N/A / 1 / North America | Pass |
+| 6h | Soft delete, account 99 (rolled back) | Inside: 100 rows, 0, 1 written; after rollback 1 | 100 / 0 / 1; 1 | Pass |
+| 6i | Guard: seventh account level | Rejected, 100 rows | Rejected, 100 | Pass |
+| 6j | Guard: unknown top account | Rejected, 100 rows | Rejected, 100 | Pass |
+| 7 | Re-run of all five loads | 5 steps succeeded, 0 rows written | 5 / 5 / 0 | Pass |
+
+Notes:
+- The first run failed tests 1 and 4 and could not run the guard tests: all 36 staging tables
+  were empty (staging had been recreated without reloading it), so the loads marked every
+  finance row and all 13 territory rows as no longer in the source. No code was wrong. Staging
+  was reloaded (batch 3068, 316,932 rows, equal to test B2), and the second run passed. The
+  soft-deleted rows returned to `is_in_source = 1`, which also proves that rows coming back to
+  the source are restored.
+- Fix to the test: a precondition at the top now stops the script when staging is empty.
+- Balance sheet signs: the only balance sheet account with a `-` operator is
+  "Liabilities and Owners Equity" (account 20). Every account inside Assets and inside
+  Liabilities and Owners Equity adds up with `+`, so balance sheet totals are correct as long
+  as a measure never adds the two sides together.
+- The full pipeline (Step B5) will check staging row counts right after the staging load and
+  stop before the dimensions run, so an empty staging can never mark the warehouse as deleted.
