@@ -4,7 +4,7 @@ The warehouse `EnterpriseBI_DW` holds a **fact constellation**: 7 fact tables th
 17 dimensions. Shared (conformed) dimensions such as date, product and employee let the four
 modules (sales, finance, HR, supply chain) be analysed together.
 
-Decision IDs (D01-D101) refer to [`decision_log.md`](decision_log.md).
+Decision IDs (D01-D106) refer to [`decision_log.md`](decision_log.md).
 
 ---
 
@@ -13,7 +13,7 @@ Decision IDs (D01-D101) refer to [`decision_log.md`](decision_log.md).
 | Rule | Detail | Decision |
 |---|---|---|
 | Keys | Facts link to dimensions through surrogate keys (`<name>_key`). The source ID is kept as `<name>_id`. | D12, D59 |
-| Special keys | `-1` = Unknown (data missing). `-2` = Not applicable (no value can exist). Keys are never NULL. | D17, D59 |
+| Special keys | `-1` = Unknown (data missing). `-2` = Not applicable (no value can exist). Keys are never NULL, except `manager_key` (hierarchy root, D90) and `ship_date_key` (order not yet shipped, D102). | D17, D59, D90, D102 |
 | Unknown measures | NULL, never 0. A real zero means "known to be zero". | D17 |
 | Audit columns | Every fact has `batch_id` (link to `etl.load_log`) and `loaded_at`. | D10 |
 | Dates | `date_key` is a yyyymmdd number (e.g. 20250629). HR dates +4,017 days, DW dates +4,170 days. | D19-D21 |
@@ -122,16 +122,16 @@ paths between the same tables.
 
 | Column | Meaning |
 |---|---|
-| `order_date_key`, `due_date_key`, `ship_date_key` | Dates (order date is the main one) |
+| `order_date_key`, `due_date_key`, `ship_date_key` | Dates (order date is the main one); `ship_date_key` is empty for an order not yet shipped (D102) |
 | `product_key`, `customer_key`, `territory_key`, `promotion_key`, `ship_method_key` | Dimension links |
 | `salesperson_key` | Employee; `-2` (Not applicable) for online orders |
 | `sales_order_id`, `sales_order_line_id`, `sales_order_number` | Trace back to the source |
 | `channel` | Online / Reseller |
-| `order_status` | Source status (all Shipped today) |
+| `order_status` | Source status text, as the source function returns it (D104; all Shipped today) |
 | `order_qty`, `unit_price`, `discount_pct` | From the line |
 | `gross_amount` | Unit price x quantity, before discount |
 | `discount_amount` | Gross amount - line total |
-| `line_total` | Revenue for the line |
+| `line_total` | Revenue for the line, 6 decimals as in the source (D105) |
 | `unit_cost` | Cost valid on the order date |
 | `cost_amount`, `gross_margin` | Unit cost x quantity; line total - cost amount |
 | `is_cost_estimated` | 1 for the 64 lines sold after their cost history ended |
@@ -259,7 +259,7 @@ suppression (D64).
 | `dim_account` | DW `DimAccount` | code, name, account type, operator, value type, statement, `sign_to_net_income`, levels 1-6, sort order (D96), `is_leaf` | -1 |
 | `dim_organization` | DW `DimOrganization` + `DimCurrency` | name, levels 1-3, region group (D95), mapped territory through `etl.org_territory_map` (D94), currency code, `is_leaf` | -1 |
 | `dim_scenario` | DW `DimScenario` | Actual, Budget, Forecast | -1 |
-| `dim_finance_department_group` | DW `DimDepartmentGroup` | level 1 "Corporate", level 2 group, `is_corporate_direct` | -1, "Corporate (direct)" |
+| `dim_finance_department_group` | DW `DimDepartmentGroup` | level 1 "Corporate", level 2 group, `is_corporate_direct` (Corporate's own source row is shown as level 2 "Corporate (direct)") | -1 |
 
 **Security table** `dw.security_user_region` (user email, role, region group) is not a dimension;
 it drives row-level security through `dim_territory` and `dim_organization` (D71-D73).

@@ -190,3 +190,68 @@ JOIN Production.Product p ON p.ProductID = l.ProductID
 WHERE l.rn = 1
   AND ABS(l.StandardCost - p.StandardCost) > 0.0001;
 GO
+
+
+-- =====================================================================
+-- fact_sales: status text function (D104)
+-- =====================================================================
+-- Result (10 Nov 2026), definition of dbo.ufnGetSalesOrderStatusText:
+--   1 In process, 2 Approved, 3 Backordered, 4 Rejected, 5 Shipped,
+--   6 Cancelled, any other value '** Invalid **'.
+USE AdventureWorks2025;
+GO
+SELECT OBJECT_DEFINITION(OBJECT_ID('dbo.ufnGetSalesOrderStatusText')) AS sales_status_function;
+GO
+
+
+-- =====================================================================
+-- fact_sales: reconciliation with Microsoft's DW (D105)
+-- =====================================================================
+-- Run after dw.fact_sales is loaded.
+-- Result (10 Nov 2026):
+--   DW Internet: revenue 29,358,677.22, cost 17,277,793.58, 60,398 lines,
+--     equal to fact_sales Online (same three numbers).
+--   DW Reseller: revenue 80,450,596.98, cost 79,980,114.38, 60,855 lines.
+--     fact_sales Reseller: 80,487,704.18 / 80,010,807.23 / 60,919 lines,
+--     minus the 64 estimated-cost lines Microsoft dropped (D27):
+--     37,107.22 / 30,692.85 / 64 -> 80,450,596.96 / 79,980,114.38 / 60,855.
+--     Cost and lines equal; revenue differs by 0.02.
+--   Order by order (estimated lines excluded): 3,796 orders on both sides,
+--     none on one side only; 716 orders differ, by at most 0.000308.
+--     DW SalesAmount is money (4 decimals), source LineTotal numeric with
+--     6 decimals (inventory data types): the 0.02 is rounding.
+SELECT 'Internet' AS channel,
+       CAST(SUM(SalesAmount) AS decimal(19,2))      AS dw_revenue,
+       CAST(SUM(TotalProductCost) AS decimal(19,2)) AS dw_cost,
+       COUNT(*)                                     AS dw_lines
+FROM AdventureWorksDW2025.dbo.FactInternetSales
+UNION ALL
+SELECT 'Reseller',
+       CAST(SUM(SalesAmount) AS decimal(19,2)),
+       CAST(SUM(TotalProductCost) AS decimal(19,2)),
+       COUNT(*)
+FROM AdventureWorksDW2025.dbo.FactResellerSales;
+
+SELECT channel, COUNT(*) AS lines,
+       CAST(SUM(line_total) AS decimal(19,2))  AS revenue,
+       CAST(SUM(cost_amount) AS decimal(19,2)) AS cost
+FROM EnterpriseBI_DW.dw.fact_sales
+WHERE is_cost_estimated = 1
+GROUP BY channel;
+
+WITH f AS (SELECT sales_order_number, SUM(line_total) AS ours
+           FROM EnterpriseBI_DW.dw.fact_sales
+           WHERE channel = 'Reseller' AND is_cost_estimated = 0
+           GROUP BY sales_order_number),
+     d AS (SELECT SalesOrderNumber, SUM(SalesAmount) AS dw
+           FROM AdventureWorksDW2025.dbo.FactResellerSales
+           GROUP BY SalesOrderNumber)
+SELECT COUNT(*)                                                                         AS orders_compared,
+       SUM(CASE WHEN f.sales_order_number IS NULL OR d.SalesOrderNumber IS NULL THEN 1 ELSE 0 END) AS orders_on_one_side_only,
+       SUM(CASE WHEN f.ours <> d.dw THEN 1 ELSE 0 END)                                  AS orders_with_a_difference,
+       SUM(f.ours)                                                                      AS ours_total,
+       SUM(d.dw)                                                                        AS dw_total,
+       MAX(ABS(f.ours - d.dw))                                                          AS largest_order_difference
+FROM f
+FULL JOIN d ON d.SalesOrderNumber = f.sales_order_number;
+GO

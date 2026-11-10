@@ -128,8 +128,9 @@ Fix during testing:
 
 Notes:
 - The first run failed tests 1 and 4 and could not run the guard tests: all 36 staging tables
-  were empty (staging had been recreated without reloading it), so the loads marked every
-  finance row and all 13 territory rows as no longer in the source. No code was wrong. Staging
+  were empty (cause not confirmed), so the loads marked rows as no longer in the source:
+  all 13 territory rows, all scenario, organization and account rows, and department group 7
+  (the only group the first run showed). No code was wrong. Staging
   was reloaded (batch 3068, 316,932 rows, equal to test B2), and the second run passed. The
   soft-deleted rows returned to `is_in_source = 1`, which also proves that rows coming back to
   the source are restored.
@@ -140,3 +141,30 @@ Notes:
   as a measure never adds the two sides together.
 - The full pipeline (Step B5) will check staging row counts right after the staging load and
   stop before the dimensions run, so an empty staging can never mark the warehouse as deleted.
+
+---
+
+## B4a: Sales fact
+
+**Script:** `tests/test_fact_sales.sql` | **Run:** 2026-11-10 (batch 4044) | **Result:** 7 of 7 passed (test 4 is information)
+
+| # | Test | Expected | Measured | Result |
+|---|---|---|---|---|
+| 1 | Grain and totals vs staging | 6 checks equal | 6 of 6 (121,317 lines; line_total 109,846,381.399888 = staging; 109,846,381.40 to the cent as in B2; order_qty 274,914; 0 orders differ from SubTotal) | Pass |
+| 2 | Keys | 10 checks equal | 10 of 10 (0 unknown keys; 60,398 online lines with "No salesperson"; 0 lines without ship date; 0 date keys differ from staging) | Pass |
+| 3 | Rules (amounts, cost rule D26, channel, status D104) | 12 checks equal | 12 of 12 (64 estimated-cost lines on 25 products; 0 lines without cost; 0 lines whose cost differs from the period containing the order date; 0 status texts differ from the source function) | Pass |
+| 4 | Revenue, cost and margin by channel (information) | - | Online 60,398 lines, revenue 29,358,677.22, cost 17,277,793.58, margin 41.15%; Reseller 60,919 lines, revenue 80,487,704.18, cost 80,010,807.23, margin 0.59% | - |
+| 5 | Lineage | 0 rows without lineage, 1 batch | 0 / 1 | Pass |
+| 6 | Failed load keeps the last good data (duplicate line added to staging) | failed, 121,317 rows kept, step Failed, duplicate removed | failed / 121,317 / Failed / 0 | Pass |
+| 6b | Empty staging is refused (D106, rolled back) | refused, 121,317 fact rows, 121,317 staging lines, 0 open transactions | refused / 121,317 / 121,317 / 0 | Pass |
+| 7 | Re-run | Succeeded, 121,317 rows, 109,846,381.40, 0 rows from other batches | Succeeded / 121,317 / 109,846,381.40 / 0; load 4 seconds | Pass |
+
+Notes:
+- Reconciliation with Microsoft's DW (D105, `fact_sales_checks.sql`): Online equals DW Internet sales on
+  lines, revenue and cost. Reseller equals DW Reseller sales after removing the 64 estimated-cost lines
+  Microsoft dropped (D27): lines and cost equal, revenue differs by 0.02, because DW stores line amounts
+  with 4 decimals (largest difference per order 0.000308). The low reseller margin is in the source data.
+- An earlier run on the same day (batch 3105, before D104 and D106) passed every check it had; its reload
+  took 2 seconds.
+- This run took about 4 minutes in total, while the earlier run took seconds. The cause was not
+  identified; the results are not affected.

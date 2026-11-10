@@ -362,7 +362,9 @@ GO
 -- USD ones included (3 rows each for US divisions). Exchange differences
 -- in USD units do not prove local currency for the others, so the test is
 -- inconclusive.
--- Decision: treat finance amounts as the reporting currency (USD).
+-- SUPERSEDED by currency evidence 3 below and decision D36 (amounts are local
+-- currency, converted to USD). Kept as history.
+-- Decision at this point: treat finance amounts as the reporting currency (USD).
 --   No evidence of local currency; DW rates are synthetic, so converting
 --   would add invented distortion; company-level finance sales are within
 --   about 6% of USD sales. Organization currency is kept in

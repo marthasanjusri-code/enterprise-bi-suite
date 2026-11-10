@@ -3,7 +3,7 @@
 How data moves from the two source databases to the Power BI report, how the load is scheduled
 and checked, and how access is controlled.
 
-Decision IDs (D01-D101) refer to [`decision_log.md`](decision_log.md).
+Decision IDs (D01-D106) refer to [`decision_log.md`](decision_log.md).
 
 ---
 
