@@ -214,3 +214,29 @@ GO
 --   - dim_finance_department_group: level 1 "Corporate", level 2 = group
 --     name, plus member "Corporate (direct)" for Corporate's own rows.
 --   - dim_scenario: Actual, Budget, Forecast (kept, no rows yet).
+
+-- =====================================================================
+-- dim_account: operators inside the balance sheet
+-- =====================================================================
+-- 5. Does any balance sheet account subtract (operator "-")? If so, balance
+--    sheet totals would need their own sign column, like sign_to_net_income.
+-- Result (10 Nov 2026):
+--   Balance Sheet: "-" 1 account (20 Liabilities and Owners Equity),
+--   "~" 1 (1 Balance Sheet itself), "+" 44 (all others, including
+--   1150 Allowance for Bad Debt). Net Income: "-" 6, "+" 42.
+--   Statistical Accounts: "~" 5.
+-- Decision (D97): no balance sheet sign column. Totals are taken within
+--   Assets or within Liabilities and Owners Equity, never across them.
+WITH t AS (
+    SELECT AccountKey, ParentAccountKey, AccountCodeAlternateKey, AccountDescription, Operator,
+           CAST(AccountDescription AS nvarchar(200)) AS top_account
+    FROM AdventureWorksDW2025.dbo.DimAccount WHERE ParentAccountKey IS NULL
+    UNION ALL
+    SELECT c.AccountKey, c.ParentAccountKey, c.AccountCodeAlternateKey, c.AccountDescription, c.Operator, t.top_account
+    FROM t JOIN AdventureWorksDW2025.dbo.DimAccount c ON c.ParentAccountKey = t.AccountKey
+)
+SELECT top_account, Operator, COUNT(*) AS accounts,
+       STRING_AGG(CAST(AccountCodeAlternateKey AS varchar(10)) + ' ' + AccountDescription, '; ') AS which
+FROM t
+GROUP BY top_account, Operator
+ORDER BY top_account, Operator;

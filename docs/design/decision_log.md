@@ -109,6 +109,7 @@ in this log changes one of them (for example D49, D53), this log takes precedenc
 | D39 | Balance sheet rows are month-end balances; measures take the closing balance of the last month that has balance sheet rows. | Land and buildings are positive in every month (movements would be mostly zero). May 2025 has no balance sheet rows. | Finance dimension checks: check 3b |
 | D40 | Finance and sales are never combined in one KPI. | They agree in total (about 6%) but not per organisation. | Finance checks: currency check (F8 finding) |
 | D41 | HR KPIs use HR data, never the finance Headcount account. | Avoids two different headcount numbers. | Step 2.4 |
+| D97 | Balance sheet amounts are added only within Assets or within Liabilities and Owners Equity, never across the two; no balance sheet sign column is stored. | The only balance sheet account with a "-" operator is Liabilities and Owners Equity (account 20); every account inside either side adds with "+". Adding both sides gives 0 by design. | Finance dimension checks: check 5 |
 
 ### fact_purchase (one row per purchase order line)
 
@@ -163,6 +164,10 @@ in this log changes one of them (for example D49, D53), this log takes precedenc
 | D68 | `dim_account`: statement type, sign towards Net Income, levels 1-6 flattened (leaf name repeated), tree sort order. | Correct profit lines and a naturally ordered income statement. | Finance dimension checks |
 | D69 | `dim_organization`: levels 1-3 flattened (leaf name repeated), region group from level 1, mapped sales territory, currency. | The tree is ragged (US divisions one level deeper); level 1 matches the region groups. | Finance dimension checks: check 4 |
 | D70 | `dim_finance_department_group` includes "Corporate (direct)". | Holds Corporate's own rows under the Corporate total. | Finance checks |
+| D93 | Customer geography stops at country and sales territory; Person.Address and Person.StateProvince are not loaded, although the inventory first marked them "Use". | Territory and country already serve maps, slicers and row-level security; city and state answer no business question in S1-S9 and would add a staging table, a dimension change and tests. Less personal location data enters the warehouse. | Inventory (updated); review of 10 Nov 2026 |
+| D94 | Finance units are linked to sales territories through an explicit table, `etl.org_territory_map` (9 rows), never by ID or by name rules. | The IDs differ between the two databases (finance Northeast Division = 3, sales territory 3 = Central); a reviewable table cannot silently mismatch. Map names are checked against the source by test. | `sql/02_warehouse/21_dim_organization.sql`, `tests/test_dim_finance.sql` test 4 |
+| D96 | `dim_account` sort order follows the account tree, with siblings ordered by account code as text. | Reproduces the source's own order: as text, Commissions (6100) falls between Labor Expenses (600) and Travel Expenses (620); as a number it would fall after Depreciation (680). | `tests/test_dim_finance.sql` test 4 (sort order rows) |
+| D99 | `dim_account` and `dim_organization` carry `is_leaf`. | Finance facts link only to leaf accounts and leaf units; the flag lets checks and reports separate leaves from totals. | `tests/test_dim_finance.sql` test 4 (72 leaf accounts, 9 leaf units) |
 
 ## 7. Security
 
@@ -172,6 +177,7 @@ in this log changes one of them (for example D49, D53), this log takes precedenc
 | D72 | Regional managers see their region's sales, quotas, salespeople and finance, plus company-wide inventory. They do not see HR, purchasing, production, `dim_employee_hr` or unknown (-1) rows. | Region exists only for sales and finance; stock is not sensitive and helps sales; HR is sensitive. | Step 2.6 |
 | D73 | A user missing from the mapping table sees no data. | Secure by default. | Step 2.6 |
 | D74 | Security is demonstrated with "View as" in Power BI Desktop; the .pbix file itself is not protected. | Row-level security is enforced when content is shared through the Power BI Service. | Step 2.6 |
+| D95 | Region group of a finance unit: a leaf unit takes the region group of its mapped territory; a parent unit takes the one group shared by all its leaves, or "All regions" when they differ; a leaf unit missing from the map gets "N/A" and matches no regional manager. | Security fails closed: a new unit stays hidden from regional managers until it is mapped, and it never changes its parent's region. | `tests/test_dim_finance.sql` test 6g |
 
 ## 8. Pipeline
 
@@ -180,6 +186,7 @@ in this log changes one of them (for example D49, D53), this log takes precedenc
 | D76 | Facts are fully reloaded on every run; dimensions are merged (update existing, insert new). | Volumes are small (largest source table 121,317 rows), so a full reload is fast and never misses updates or deletes; merged dimensions keep surrogate keys stable. Incremental loading by `ModifiedDate` is the next step if volumes grow. | Architecture, Step 2.7 |
 | D77 | Data quality checks run on every load; errors stop the job, warnings are logged and reported. | Half-loaded or broken data never reaches the report; known anomalies stay visible. | Architecture, Step 2.7 |
 | D78 | The SQL Server Agent job runs nightly at 02:00. | Outside working hours. | Architecture, Step 2.7 |
+| D100 | The pipeline compares every staging row count with its source right after the staging load and stops before any dimension runs if a table is empty or a count differs. | An empty staging makes every dimension load mark its rows as no longer in the source; this happened in testing on 10 Nov 2026 (all 13 territory and all finance rows). Stopping early keeps the warehouse unchanged. | `docs/test_results.md`, B3d notes |
 
 ## 9. Staging
 
@@ -204,6 +211,7 @@ in this log changes one of them (for example D49, D53), this log takes precedenc
 | D90 | Manager: parent path found -> that employee; parent path "/" -> the top employee (the only one without a node); the top employee and the special rows have no parent (NULL); otherwise -1. Loaded in a second pass after all employees have keys. `manager_key` is the one key allowed to be empty, because it describes a hierarchy, not a link to a fact. | Proven on staging: the Chief Executive Officer has no node and exactly 6 level-1 employees have parent "/". A hierarchy root needs an empty parent, and a row pointing to itself is a loop that Power BI's PATH function rejects (found by test: the first version made row -2 its own manager). | `sql/02_warehouse/17_dim_employee.sql`, `tests/test_dim_employee.sql` |
 | D91 | `dim_employee_hr` uses the same key as `dim_employee`; its age band is the exact age (birthday counted) on `etl.setting` hr_as_of_date = 2025-10-31, the last month-end of the headcount snapshot. | One key for both tables; "current" HR values refer to the end of the HR data, never today (D24). | `sql/02_warehouse/18_dim_employee_hr.sql`, `05_etl_settings.sql` |
 | D92 | Buyers are employees with job title Buyer, Purchasing Assistant or Purchasing Manager (12). | These are exactly the titles that place purchase orders. | Purchase checks: check 7 |
+| D98 | Hierarchy dimensions check the shape they rely on and stop the load if it changes: department groups two levels, organization at most four, accounts at most six levels with top accounts 1, 4 and 9500 only, and every map row pointing to a real territory. | Flattened level columns and statement rules would otherwise misplace rows without any error. | `tests/test_dim_finance.sql` tests 6c, 6e, 6f, 6i, 6j |
 
 ## 11. Documentation
 

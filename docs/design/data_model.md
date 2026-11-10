@@ -4,7 +4,7 @@ The warehouse `EnterpriseBI_DW` holds a **fact constellation**: 7 fact tables th
 17 dimensions. Shared (conformed) dimensions such as date, product and employee let the four
 modules (sales, finance, HR, supply chain) be analysed together.
 
-Decision IDs (D01-D92) refer to [`decision_log.md`](decision_log.md).
+Decision IDs (D01-D100) refer to [`decision_log.md`](decision_log.md).
 
 ---
 
@@ -256,10 +256,10 @@ suppression (D64).
 | `dim_scrap_reason` | `Production.ScrapReason` | reason | -1, -2 "No scrap" |
 | `dim_department` | `HumanResources.Department` | department, department group | -1 |
 | `dim_shift` | `HumanResources.Shift` | name, start time, end time | -1 |
-| `dim_account` | DW `DimAccount` | code, name, account type, operator, value type, statement, `sign_to_net_income`, levels 1-6, sort order | -1 |
-| `dim_organization` | DW `DimOrganization` + `DimCurrency` | name, levels 1-3, region group, mapped territory, currency code | -1 |
+| `dim_account` | DW `DimAccount` | code, name, account type, operator, value type, statement, `sign_to_net_income`, levels 1-6, sort order (D96), `is_leaf` | -1 |
+| `dim_organization` | DW `DimOrganization` + `DimCurrency` | name, levels 1-3, region group (D95), mapped territory through `etl.org_territory_map` (D94), currency code, `is_leaf` | -1 |
 | `dim_scenario` | DW `DimScenario` | Actual, Budget, Forecast | -1 |
-| `dim_finance_department_group` | DW `DimDepartmentGroup` | level 1 "Corporate", level 2 group | -1, "Corporate (direct)" |
+| `dim_finance_department_group` | DW `DimDepartmentGroup` | level 1 "Corporate", level 2 group, `is_corporate_direct` | -1, "Corporate (direct)" |
 
 **Security table** `dw.security_user_region` (user email, role, region group) is not a dimension;
 it drives row-level security through `dim_territory` and `dim_organization` (D71-D73).

@@ -3,7 +3,7 @@
 How data moves from the two source databases to the Power BI report, how the load is scheduled
 and checked, and how access is controlled.
 
-Decision IDs (D01-D92) refer to [`decision_log.md`](decision_log.md).
+Decision IDs (D01-D100) refer to [`decision_log.md`](decision_log.md).
 
 ---
 
@@ -80,7 +80,7 @@ Every run writes each check to `etl.dq_result` (batch id, check, severity, value
 
 | Check | Severity | Expected today | Source decision |
 |---|---|---|---|
-| Staging row counts equal source row counts | Error | Equal | D10 |
+| Staging row counts equal source row counts, checked right after the staging load and before any dimension runs | Error | Equal | D10, D100 |
 | Fact rows with a missing date | Error | 0 | D22 |
 | Fact rows with key -1 (Unknown) where a value must exist | Error | 0 | D59 |
 | Purchase: ordered = accepted + rejected + short-delivered value, per line | Error | 0 failures | D42 |
