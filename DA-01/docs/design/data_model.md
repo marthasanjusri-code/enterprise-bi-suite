@@ -4,7 +4,7 @@ The warehouse `EnterpriseBI_DW` holds a **fact constellation**: 7 fact tables th
 17 dimensions. Shared (conformed) dimensions such as date, product and employee let the four
 modules (sales, finance, HR, supply chain) be analysed together.
 
-Decision IDs (D01-D110) refer to [`decision_log.md`](decision_log.md).
+Decision IDs (D01-D113) refer to [`decision_log.md`](decision_log.md).
 
 ---
 
@@ -181,11 +181,11 @@ are never combined in one KPI (D40).
 |---|---|
 | `order_date_key`, `due_date_key`, `ship_date_key` | Dates |
 | `product_key`, `vendor_key`, `buyer_key`, `ship_method_key` | Links |
-| `purchase_order_id`, `purchase_order_line_id`, `po_status` | Trace and status |
+| `purchase_order_id`, `purchase_order_line_id`, `po_status` | Trace and status; status text as the source function returns it (D111) |
 | `order_qty`, `received_qty`, `rejected_qty`, `stocked_qty` | Quantities |
 | `unit_price` | Order price |
 | `ordered_value`, `accepted_value`, `rejected_value`, `short_delivered_value` | Ordered = accepted + rejected + short-delivered (D42) |
-| `freight_allocated` | Order freight split by value, exact (D44) |
+| `freight_allocated` | Order freight split by value, exact (D44, D111) |
 | `promised_lead_days` | Vendor's average lead time (current value) |
 | `is_due_date_invalid` | 1 when the due date is before the order date (D45) |
 
@@ -213,7 +213,7 @@ The table is replaced on every load.
 | `snapshot_date_key` | Latest source date (11 Aug 2025 today) |
 | `product_key`, `location_key` | Links; `location_key` = "No stock location" for zero rows |
 | `quantity` | Units at the location |
-| `unit_cost`, `stock_value`, `cost_source` | Standard cost, else last purchase price, else NULL (D53) |
+| `unit_cost`, `stock_value`, `cost_source` | Standard cost, else last purchase price, else NULL (D53); `stock_value` is 0 at zero quantity (D112) |
 | `last_modified_date` | When the source row last changed |
 | `is_zero_stock_row` | 1 for the added zero rows |
 
@@ -223,7 +223,7 @@ The table is replaced on every load.
 ### 4.7 fact_headcount_monthly
 
 **Answers:** H1-H5, revenue per employee. **Grain:** one row per employee per month-end, from the
-(shifted) hire date, April 2022 to October 2025 (D58). **Source:** `HumanResources.Employee`,
+(shifted) hire date, April 2022 to October 2025 (D58; window derived as in D113). **Source:** `HumanResources.Employee`,
 `EmployeeDepartmentHistory`, `EmployeePayHistory`.
 
 | Column | Meaning |
@@ -231,7 +231,7 @@ The table is replaced on every load.
 | `month_end_date_key` | Month-end |
 | `employee_key`, `department_key`, `shift_key` | Links, department and shift as of the month-end (D55) |
 | `pay_rate`, `pay_frequency` | Hourly rate as of the month-end (D56) |
-| `age_at_month_end`, `tenure_months` | Derived; birth date itself is not stored (D62) |
+| `age_at_month_end`, `tenure_months` | Derived; birth date itself is not stored (D62); tenure in calendar months from the hire month (D113) |
 | `is_hired_this_month` | 1 in the month of hire |
 
 **Rules:** semi-additive, average headcount for ratios (D57); average pay follows complementary

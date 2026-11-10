@@ -123,8 +123,9 @@ in this log changes one of them (for example D49, D53), this log takes precedenc
 |---|---|---|---|
 | D42 | Spend = accepted goods value (stocked qty x order price), across all statuses. | Pending and Approved orders hold received goods; "Rejected" means goods rejected on arrival. Ordered = accepted + rejected + short-delivered value for every status. No invoice data exists. | Purchase checks: checks 4 and B |
 | D43 | OTIF is the main vendor KPI, with unit fill rate and rejection %; only lines due by the module's last data date and with a valid due date count. | OTIF varies (89.3%) while on-time alone is 100%; all 380 short deliveries are past due. | Purchase checks: checks F and G |
-| D44 | Freight is allocated to lines by value, with the largest-remainder method. | Weight is missing for 94% of purchased products; rounding is the only cause of the allocation gap, and the remainder method makes it exact. | Purchase checks: checks C, D, E |
+| D44 | Freight is allocated to lines by value: each line gets its line-total share of the order freight rounded to cents, and the order's rounding remainder goes to its largest line (ties: D111). | Weight is missing for 94% of purchased products; rounding is the only cause of the allocation gap, and giving the remainder to one line makes the allocation add back exactly. Wording corrected on 10 Nov 2026: this row first called the rule "largest-remainder method", while check D describes the rule above. | Purchase checks: checks C, D, E; `tests/test_fact_purchase_inventory_headcount.sql` test 1 |
 | D45 | Inactive vendors are kept; 7 lines with a due date before the order date are flagged `is_due_date_invalid`. | Inactive vendors have 203 orders of history; the 7 lines are data entry errors. | Purchase checks: checks 8 and A |
+| D111 | `po_status` holds the text the source function `dbo.ufnGetPurchaseOrderStatusText` returns: 1 Pending, 2 Approved, 3 Rejected, 4 Complete, any other code "** Invalid **". When lines tie for the largest line of an order, the freight remainder goes to the one with the lowest line ID. | D05: the source is the authority; the function definition was read from the source on 10 Nov 2026 and a test compares every line with it. 190 orders have tied largest lines (query of 10 Nov 2026), so a fixed tie rule is needed for a repeatable result. | `tests/test_fact_purchase_inventory_headcount.sql` test 1 |
 
 ### fact_work_order (one row per work order)
 
@@ -145,6 +146,7 @@ in this log changes one of them (for example D49, D53), this log takes precedenc
 | D51 | Stock status compares reorder point (trigger) and safety stock (minimum) with the inventory position (on hand + open purchase quantity). Available (storage) stock is shown separately. | Standard reorder logic; column roles taken from the source descriptions. | Inventory current checks: checks B and D |
 | D52 | Active products with no inventory row get one zero-quantity row at "No stock location". | 54 finished products on sale have no stock row and would vanish from the reorder list. | Inventory current checks: check D |
 | D53 | Unit cost = standard cost, else last purchase price, else NULL. | Raises internal-part units with a cost from 2.8% to 91.5% (93.5% of all stock). | Inventory current checks: check E |
+| D112 | `stock_value` = quantity x unit cost; 0 when the quantity is 0; empty when units exist and the cost is unknown. | A zero quantity is a known zero value; unknown values stay empty (D17), as for scrap cost (D108). | `tests/test_fact_purchase_inventory_headcount.sql` test 2 |
 | D54 | The stock trend (P5) moves to open items; it could be rebuilt from OLTP transaction history. | Keeps one source of truth for stock. | Inventory daily checks |
 
 ### fact_headcount_monthly (one row per employee per month-end)
@@ -155,6 +157,7 @@ in this log changes one of them (for example D49, D53), this log takes precedenc
 | D56 | Pay is pay rate per hour for everyone, so averages compare across employees. | Source description: "Salary hourly rate". | Headcount checks: check 4 |
 | D57 | Headcount is semi-additive; revenue per employee uses average headcount of the period. | Headcount cannot be summed over months. | Step 2.4 |
 | D58 | Snapshot month-ends from April 2022 to October 2025. | First and last months with operational activity. | Date checks |
+| D113 | Headcount window: the first month-end is derived on every load as the month of the earliest sales order, purchase order or work order start date in staging (2022-04-15 -> 2022-04-30); the last is `etl.setting` hr_as_of_date (2025-10-31). `tenure_months` = calendar months from the hire month (0 in the month of hire). | Implements D58 ("first and last months with operational activity") without a hard-coded first month. Every snapshot date is a month-end, so calendar months are exact. Measured: 43 month-ends, 12,333 rows, 16 hires in the window. | Date checks: check 1; `tests/test_fact_purchase_inventory_headcount.sql` test 3 |
 
 ## 6. Dimensions
 

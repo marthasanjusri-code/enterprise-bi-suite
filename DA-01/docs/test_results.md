@@ -191,3 +191,21 @@ Notes:
   its coverage (D46).
 - Standard cost covers 146 scrapped units: 143 on components with a standard cost and 3 on the two
   finished goods without cost history, as in the work order checks.
+
+---
+
+## B4c: Purchase, current inventory and monthly headcount facts
+
+**Script:** `tests/test_fact_purchase_inventory_headcount.sql` | **Run:** 2026-11-10 (batch 4052) | **Result:** 8 of 8 passed (test 4 is information)
+
+| # | Test | Expected | Measured | Result |
+|---|---|---|---|---|
+| 1 | `fact_purchase` against staging and the purchase checks | 22 checks equal | 22 of 22 (8,845 lines, 4,012 orders; by status Approved 57, Complete 8,169, Pending 477, Rejected 142, texts equal to the source function; 2,348,637 ordered, 2,327,299 received, 72,700 rejected units; ordered value 63,791,994.838 = staging and = accepted + rejected + short-delivered on every line; spend 61.21 M; 380 short-delivered lines, 563 with rejects; freight 1,583,978.23 allocated exactly on every order; 7 invalid due dates on orders 4003 and 4006; lead time 10 to 120 days; 12 buyers; 9 to 25 days to ship; 190 orders with tied largest lines) | Pass |
+| 2 | `fact_inventory_current` against staging and the inventory checks | 15 checks equal | 15 of 15 (1,069 source rows on 432 products and 14 locations, plus 54 zero rows; snapshot 2025-08-11; 335,974 units; units by cost source 85,166 / 228,992 / 21,816; 314,158 units with a cost; value 19.23 M finished goods, 0.87 M and 8.43 M internal parts) | Pass |
+| 3 | `fact_headcount_monthly` against staging and the headcount checks | 12 checks equal | 12 of 12 (12,333 rows = independent count; 43 month-ends 2022-04-30 to 2025-10-31; headcount 283 / 287 / 290 / 290 at the four sample dates; 0 unknown keys; 0 rows without pay rate; 16 hires in the window; department, pay rate and age band at 2025-10-31 equal to staging and `dim_employee_hr`) | Pass |
+| 4 | Inventory by cost source, headcount at six month-ends (information) | - | last purchase price 533 rows, 228,992 units, 8,429,586.96; standard cost 541, 85,166, 20,092,679.17; unknown 49, 21,816, no value. Headcount 274 at 2022-04-30, 283 from 2022-05-31 (9 hires), 290 in Aug-Oct 2025; average pay rate 17.40 to 18.19 | - |
+| 5 | Lineage | 0 rows without lineage, 1 batch, all three facts | 0 / 1 for each | Pass |
+| 6a | Empty purchase staging is refused (D106, rolled back) | refused, 8,845, 8,845, 0 | As expected | Pass |
+| 6b | Empty inventory staging is refused | refused, 1,123, 1,069, 0 | As expected | Pass |
+| 6c | Empty employee staging is refused | refused, 12,333, 290, 0 | As expected | Pass |
+| 7 | Re-run | 3 steps Succeeded, 0 rows from other batches | 8,845 / 1,123 / 12,333 rows; 1, 0 and 0 seconds | Pass |
