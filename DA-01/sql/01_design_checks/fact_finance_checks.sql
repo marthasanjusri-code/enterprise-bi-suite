@@ -492,3 +492,49 @@ GO
 -- Decision: finance amounts are in LOCAL currency. Convert to USD with
 -- the database's rates, looked up on the ORIGINAL (DW timeline) date.
 -- Keep amount_local, currency_code, exchange_rate and amount_usd.
+
+
+-- =====================================================================
+-- fact_finance: facts needed by the load (queries of 10 Nov 2026)
+-- =====================================================================
+
+-- Adjustment dates (D34, D116): source dates in the months that hold two dates.
+-- Result: 2011-12-28 18 rows and 2011-12-29 1,015 rows (period 2023-05-31);
+--   2012-12-27 28 rows and 2012-12-28 1,138 rows (period 2024-05-31).
+--   The smaller set is the adjustment, in both months the earlier date.
+SELECT CAST([Date] AS date) AS source_date,
+       CAST(EOMONTH(DATEADD(day, 4170, [Date])) AS date) AS period_month_end,
+       COUNT(*) AS finance_rows
+FROM dbo.FactFinance
+WHERE EOMONTH(DATEADD(day, 4170, [Date])) IN (
+      SELECT EOMONTH(DATEADD(day, 4170, [Date])) FROM dbo.FactFinance
+      GROUP BY EOMONTH(DATEADD(day, 4170, [Date])) HAVING COUNT(DISTINCT [Date]) > 1)
+GROUP BY [Date]
+ORDER BY [Date];
+
+-- Amount precision (D114).
+-- Result: 39,409 rows, 0 with more than 2 decimals, 0 with more than 4;
+--   lowest -1,121,918, highest 4,820,988.
+SELECT COUNT(*) AS finance_rows,
+       SUM(CASE WHEN Amount <> ROUND(Amount, 2) THEN 1 ELSE 0 END) AS rows_with_more_than_2_decimals,
+       SUM(CASE WHEN Amount <> ROUND(Amount, 4) THEN 1 ELSE 0 END) AS rows_with_more_than_4_decimals,
+       MIN(Amount) AS min_amount, MAX(Amount) AS max_amount
+FROM dbo.FactFinance;
+
+-- End-of-day rate on the exact date of every balance sheet row (D36).
+-- Result: AUD 350, CAD 1,050, EUR 1,402, USD 5,322 balance sheet rows; 0 without a rate.
+WITH h AS (
+    SELECT AccountKey, AccountKey AS top_key FROM dbo.DimAccount WHERE ParentAccountKey IS NULL
+    UNION ALL
+    SELECT a.AccountKey, h.top_key FROM dbo.DimAccount a JOIN h ON a.ParentAccountKey = h.AccountKey)
+SELECT c.CurrencyAlternateKey AS org_currency,
+       COUNT(*) AS balance_sheet_rows,
+       SUM(CASE WHEN r.CurrencyKey IS NULL THEN 1 ELSE 0 END) AS rows_without_rate_on_that_date
+FROM dbo.FactFinance f
+JOIN h ON h.AccountKey = f.AccountKey AND h.top_key = 1
+JOIN dbo.DimOrganization o ON o.OrganizationKey = f.OrganizationKey
+JOIN dbo.DimCurrency c ON c.CurrencyKey = o.CurrencyKey
+LEFT JOIN dbo.FactCurrencyRate r ON r.CurrencyKey = o.CurrencyKey AND r.[Date] = f.[Date]
+GROUP BY c.CurrencyAlternateKey
+ORDER BY org_currency;
+GO

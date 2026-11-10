@@ -4,7 +4,7 @@ The warehouse `EnterpriseBI_DW` holds a **fact constellation**: 7 fact tables th
 17 dimensions. Shared (conformed) dimensions such as date, product and employee let the four
 modules (sales, finance, HR, supply chain) be analysed together.
 
-Decision IDs (D01-D113) refer to [`decision_log.md`](decision_log.md).
+Decision IDs (D01-D116) refer to [`decision_log.md`](decision_log.md).
 
 ---
 
@@ -163,13 +163,13 @@ scenario x entry type. **Source:** `AdventureWorksDW2025.dbo.FactFinance`, rates
 |---|---|
 | `period_date_key` | Month-end of the shifted date (D33) |
 | `organization_key`, `finance_department_group_key`, `account_key`, `scenario_key` | Links |
-| `entry_type` | Regular / Year-end adjustment (D34) |
-| `currency_code`, `amount_local`, `exchange_rate`, `amount_usd` | Local amount and USD conversion (D36) |
+| `entry_type` | Regular / Year-end adjustment (D34, D116) |
+| `currency_code`, `amount_local`, `exchange_rate`, `amount_usd` | Local amount and USD conversion (D36); exact decimal types (D114); statistical accounts have no rate and no USD amount |
 | `source_date` | Original DW date |
 
 **Rules:** Corporate's own rows link to "Corporate (direct)" (D35); profit lines use
 `dim_account.sign_to_net_income` (D38); balance sheet uses the closing balance of the last month
-with balance sheet rows (D39); statistical accounts are never added to money; finance and sales
+with asset rows (D39, D115); statistical accounts are never added to money; finance and sales
 are never combined in one KPI (D40).
 
 ### 4.4 fact_purchase

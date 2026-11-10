@@ -209,3 +209,24 @@ Notes:
 | 6b | Empty inventory staging is refused | refused, 1,123, 1,069, 0 | As expected | Pass |
 | 6c | Empty employee staging is refused | refused, 12,333, 290, 0 | As expected | Pass |
 | 7 | Re-run | 3 steps Succeeded, 0 rows from other batches | 8,845 / 1,123 / 12,333 rows; 1, 0 and 0 seconds | Pass |
+
+---
+
+## B4d: Finance fact
+
+**Script:** `tests/test_fact_finance.sql` | **Run:** 2026-11-11 (batch 4060) | **Result:** 5 of 5 passed (second run; test 3 is information)
+
+| # | Test | Expected | Measured | Result |
+|---|---|---|---|---|
+| 1 | Grain, dates, keys and amounts against staging and the finance checks | 18 checks equal | 18 of 18 (39,409 rows; 37 month-end periods 2022-05-31 to 2025-05-31; 46 adjustment rows on 2011-12-28 and 2012-12-27 in May 2023 and May 2024; 6 grain pairs of a regular and an adjustment row; 0 unknown keys; 0 rows on parent accounts or units; 8,843 Corporate (direct) rows; amount_local 1,358,640,412.70 = staging and equal on every row; balance sheet rows AUD 350, CAD 1,050, EUR 1,402, USD 5,322; May 2025 balance sheet 6 rows on 3 units netting to 0, only accounts 3010 and 3020; last month with asset rows 2025-04-30) | Pass |
+| 2 | Currency conversion (D36) | 8 checks equal | 8 of 8 (statistical rows without rate; every money row converted; USD at 1.0; monthly average and end-of-day rates equal to a separate recomputation; amount_usd = amount_local x rate; salaries per head in USD Australia 4,303, Canada 4,905, France 3,145, Germany 2,411 as in conversion test B; assets = liabilities + equity in every month, local amounts, Actual) | Pass |
+| 3 | Rows and amounts by statement and currency (information) | - | e.g. balance sheet CAD 231,313,765.42 local = 150,238,103.07 USD; income statement EUR 16,854,017.33 local = 15,380,788.23 USD | - |
+| 4 | Lineage | 0 rows without lineage, 1 batch | 0 / 1 | Pass |
+| 5 | Empty staging is refused (D106, rolled back) | refused, 39,409, 39,409, 0 | As expected | Pass |
+| 6 | Re-run | Succeeded, 39,409, 0 rows from other batches | As expected; 1 second | Pass |
+
+Notes:
+- The first run (batch 4057) failed one check: "balance sheet rows in May 2025" expected 0 (from D39),
+  measured 6. The code was right; D39's evidence (dim finance check 3b) covered USD units only. The 6
+  rows are equity reclassifications for France, Germany and Australia that net to 0 per unit. D39 was
+  corrected, D115 added, and the check replaced by three checks; the second run passed.

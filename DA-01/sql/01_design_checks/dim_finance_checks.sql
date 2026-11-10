@@ -198,6 +198,12 @@ GO
 --   By shifted month, assets = liabilities + equity in all 36 months from
 --   May 2022 to April 2025, with no doubled months. May 2025 has NO
 --   balance sheet rows (income statement only).
+--   CORRECTION (11 Nov 2026): this query covers USD units only. Over all
+--   units, May 2025 holds 6 balance sheet rows: equity reclassifications
+--   (3010 Partner Capital / 3020 Additional Paid In Capital, +/-475,000 for
+--   France and Germany, +/-225,000 for Australia, source date 2013-12-28)
+--   that net to 0 per unit, and no asset rows. See the query at the end of
+--   this file, D39 and D115.
 --   Cash, Trade Receivables, Land, Buildings, Machinery and Office
 --   Furniture: 276 rows each, 0 negative, 0 zero. Land and buildings are
 --   positive every month: the rows are month-end BALANCES, not movements.
@@ -240,3 +246,33 @@ SELECT top_account, Operator, COUNT(*) AS accounts,
 FROM t
 GROUP BY top_account, Operator
 ORDER BY top_account, Operator;
+
+
+-- =====================================================================
+-- Correction to check 3b: May 2025 balance sheet over all units (D39, D115)
+-- =====================================================================
+-- Run after dw.fact_finance is loaded.
+-- Result (11 Nov 2026): 6 rows (finance_id 39395, 39396, 39400, 39401,
+--   39405, 39406), Actual, Regular, source date 2013-12-28, France and
+--   Germany EUR +/-475,000, Australia AUD +/-225,000 on accounts 3010 / 3020.
+--   Balance sheet rows: March 2025 263, April 2025 263, May 2025 6.
+USE EnterpriseBI_DW;
+GO
+SELECT f.finance_id, f.source_date, sc.scenario_name, o.organization_name, f.currency_code,
+       a.account_code, a.account_name, f.entry_type, f.amount_local
+FROM dw.fact_finance f
+JOIN dw.dim_account a       ON a.account_key = f.account_key
+JOIN dw.dim_scenario sc     ON sc.scenario_key = f.scenario_key
+JOIN dw.dim_organization o  ON o.organization_key = f.organization_key
+WHERE a.statement = 'Balance sheet' AND f.period_date_key = 20250531
+ORDER BY f.finance_id;
+
+SELECT d.full_date AS period, sc.scenario_name, COUNT(*) AS balance_sheet_rows
+FROM dw.fact_finance f
+JOIN dw.dim_account a   ON a.account_key = f.account_key
+JOIN dw.dim_scenario sc ON sc.scenario_key = f.scenario_key
+JOIN dw.dim_date d      ON d.date_key = f.period_date_key
+WHERE a.statement = 'Balance sheet' AND f.period_date_key IN (20250331, 20250430, 20250531)
+GROUP BY d.full_date, sc.scenario_name
+ORDER BY d.full_date, sc.scenario_name;
+GO
