@@ -1,8 +1,10 @@
-# Enterprise BI Suite
+# Data Analytics Internship Projects
 
-Power BI reporting for a multi-region company covering sales,
-finance, HR and supply chain, with row-level security by region.
+Two projects from the Data Analytics specialization track.
 
-Source data: Microsoft AdventureWorks2025 and AdventureWorksDW2025.
+| Folder | Project | Stack | Status |
+|---|---|---|---|
+| [`DA-01`](DA-01) | Enterprise Business Intelligence Suite for a Multi-Region Company | SQL Server, SQL Server Agent, Power BI, Power Query, DAX | In progress |
+| [`DA-02`](DA-02) | Customer 360 and Marketing Attribution Platform | BigQuery, dbt, Python, Tableau | Not started |
 
-Work in progress.
+Each folder has its own README with architecture, setup and run steps.
