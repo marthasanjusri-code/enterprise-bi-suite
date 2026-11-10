@@ -42,6 +42,7 @@ in this log changes one of them (for example D49, D53), this log takes precedenc
 | D04 | Use base tables, not the sample views or the helper functions shipped with AdventureWorks. | Full control over every join and column. | Inventory |
 | D05 | Code meanings (status, product line, class, style, pay frequency, credit rating, channel) are taken from the source's own column descriptions and functions. | The source is the authority, not memory or guesswork. | Value profiling: official meaning of code columns, status codes |
 | D06 | TransactionHistoryArchive is older history (2022-04 to 2024-07), not a duplicate. Kept as optional. | Date and ID ranges do not overlap; 0 shared IDs. | Source profiling: archive duplicate check |
+| D101 | The Step 1 inventory is reconciled with the built warehouse: 2 tables promoted (ProductVendor for promised lead time, FactCurrencyRate for D36), 4 tables dropped (Address and StateProvince by D93; DW FactProductInventory and DimProduct by D49), and the column decisions brought in line with staging. The Step 1 decision is kept as history; new columns "Final decision", "Changed by" and "Change reason" record every change. | The inventory listed columns that were never loaded and missed columns that are. After reconciliation, 36 tables and 195 columns are "Use" or "Use (pipeline)": exactly the tables and source columns in staging. | Inventory: Final decision columns; `sql/02_warehouse/03_staging_tables.sql` |
 
 ## 2. Architecture and tools
 
