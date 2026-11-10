@@ -13,6 +13,21 @@
 USE EnterpriseBI_DW;
 GO
 
+-- Precondition: staging must be loaded, or every check below is meaningless
+-- (an empty staging makes the loads mark all rows as no longer in the source).
+-- NOEXEC ON skips every later batch; it is switched off again at the end of the script.
+IF NOT EXISTS (SELECT 1 FROM stg.awdw_dim_scenario)
+   OR NOT EXISTS (SELECT 1 FROM stg.awdw_dim_department_group)
+   OR NOT EXISTS (SELECT 1 FROM stg.awdw_dim_organization)
+   OR NOT EXISTS (SELECT 1 FROM stg.awdw_dim_currency)
+   OR NOT EXISTS (SELECT 1 FROM stg.awdw_dim_account)
+   OR NOT EXISTS (SELECT 1 FROM stg.aw_sales_territory)
+BEGIN
+    RAISERROR('Staging is empty. Run etl.load_staging first; tests stopped.', 16, 1);
+    SET NOEXEC ON;
+END;
+GO
+
 -- 0. Load the dimensions in one real batch (dim_territory first: the organization map needs it).
 DECLARE @batch_id int;
 EXEC etl.start_batch @batch_id = @batch_id OUTPUT;
@@ -687,4 +702,9 @@ SELECT  COUNT(*)                                               AS steps,
         SUM(rows_written)                                      AS total_rows_written
 FROM etl.load_log
 WHERE batch_id = @batch_id;
+GO
+
+
+-- Switch execution back on (see the precondition at the top).
+SET NOEXEC OFF;
 GO
