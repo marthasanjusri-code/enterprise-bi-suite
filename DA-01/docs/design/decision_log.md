@@ -59,12 +59,13 @@ in this log changes one of them (for example D49, D53), this log takes precedenc
 
 | ID | Decision | Reason | Evidence |
 |---|---|---|---|
-| D13 | The model is designed from business questions S1-S9, F1-F8, H1-H5, P1-P9 and an executive overview. | Tables exist only to answer questions. | Step 2.2 |
+| D13 | The model is designed from business questions S1-S9, F1-F8, H1-H5, P1-P9 and an executive overview. | Tables exist only to answer questions. | `business_questions.md` (Step 2.2) |
 | D14 | Revenue = sum of line totals (after discount, before tax and freight), excluding Rejected and Cancelled orders. | Standard revenue definition; tax and freight are not sales income. Line totals add up to every order's SubTotal. | Sales checks: checks 2 and 3 |
-| D15 | HR "top performing employees" is not built. | The source has no performance data for non-sales roles; pay or tenure as a proxy would be misleading and unfair. | Step 2.2 |
-| D16 | "Top performing salespeople" (S9) is built from revenue and quota attainment. | Salesperson performance is measurable in the data. | Step 2.2 |
+| D15 | HR "top performing employees" is not built. | The source has no performance data for non-sales roles; pay or tenure as a proxy would be misleading and unfair. | `business_questions.md` (Step 2.2) |
+| D16 | "Top performing salespeople" (S9) is built from revenue and quota attainment. | Salesperson performance is measurable in the data. | `business_questions.md`, S9 (Step 2.2) |
 | D17 | Measures use NULL for unknown values; keys never use NULL. | Aggregates skip NULL, so averages stay correct and coverage can be counted. A NULL key would make rows disappear from visuals. | Work order checks: cost decisions |
 | D18 | A KPI that never varies is kept as a hidden measure, not shown: sales on-time shipping (always 7-8 days), vendor on-time delivery (100%). | A constant KPI gives no information; keeping the data allows it to be shown if data changes. | Sales checks: check 6; Purchase checks: check G |
+| D107 | The business questions are kept in `business_questions.md`: 24 taken from saved screenshots of the Step 2.2 list (S2, S4, F2, H3 improved on 10 Nov 2026 with evidence; P1, P3, P7 shown as changed by D42, D43, D47, originals quoted); S9, F5-F8, P8, P9 and the executive overview rebuilt on 10 Nov 2026 from what the repository already fixes for them, and confirmed by the project owner. The documents of Steps 2.1, 2.4, 2.6 and 2.7 were not kept; their outcomes are the decisions in this log that cite them. | The original Step 2.2 document was not kept. Rebuilding only from recorded evidence keeps every question consistent with the built design; every change quotes the original wording and gives its evidence. | `business_questions.md` |
 
 ## 4. Dates and timelines
 

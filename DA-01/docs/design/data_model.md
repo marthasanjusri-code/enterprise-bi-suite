@@ -4,7 +4,7 @@ The warehouse `EnterpriseBI_DW` holds a **fact constellation**: 7 fact tables th
 17 dimensions. Shared (conformed) dimensions such as date, product and employee let the four
 modules (sales, finance, HR, supply chain) be analysed together.
 
-Decision IDs (D01-D106) refer to [`decision_log.md`](decision_log.md).
+Decision IDs (D01-D107) refer to [`decision_log.md`](decision_log.md).
 
 ---
 
