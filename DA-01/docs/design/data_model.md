@@ -4,7 +4,7 @@ The warehouse `EnterpriseBI_DW` holds a **fact constellation**: 7 fact tables th
 17 dimensions. Shared (conformed) dimensions such as date, product and employee let the four
 modules (sales, finance, HR, supply chain) be analysed together.
 
-Decision IDs (D01-D107) refer to [`decision_log.md`](decision_log.md).
+Decision IDs (D01-D110) refer to [`decision_log.md`](decision_log.md).
 
 ---
 
@@ -13,7 +13,7 @@ Decision IDs (D01-D107) refer to [`decision_log.md`](decision_log.md).
 | Rule | Detail | Decision |
 |---|---|---|
 | Keys | Facts link to dimensions through surrogate keys (`<name>_key`). The source ID is kept as `<name>_id`. | D12, D59 |
-| Special keys | `-1` = Unknown (data missing). `-2` = Not applicable (no value can exist). Keys are never NULL, except `manager_key` (hierarchy root, D90) and `ship_date_key` (order not yet shipped, D102). | D17, D59, D90, D102 |
+| Special keys | `-1` = Unknown (data missing). `-2` = Not applicable (no value can exist). Keys are never NULL, except `manager_key` (hierarchy root, D90), `ship_date_key` (order not yet shipped, D102) and `end_date_key` (work order still open, D108). | D17, D59, D90, D102, D108 |
 | Unknown measures | NULL, never 0. A real zero means "known to be zero". | D17 |
 | Audit columns | Every fact has `batch_id` (link to `etl.load_log`) and `loaded_at`. | D10 |
 | Dates | `date_key` is a yyyymmdd number (e.g. 20250629). HR dates +4,017 days, DW dates +4,170 days. | D19-D21 |
@@ -150,7 +150,7 @@ days to ship and on-time % are DAX measures (D18, D29).
 | `salesperson_key`, `territory_key` | Links; managers use a region-level territory row |
 | `quota_period_start`, `quota_period_end` | Period covered (3 months, D30) |
 | `sales_quota` | Target amount |
-| `territory_source` | history / nearest_history / region_from_orders / unknown (D32) |
+| `territory_source` | history / nearest_history / region_from_orders / unknown (D32, D109) |
 
 **Rule:** actual vs quota is compared by quota period, not calendar quarter (D31).
 
@@ -195,12 +195,12 @@ are never combined in one KPI (D40).
 
 | Column | Meaning |
 |---|---|
-| `start_date_key`, `end_date_key`, `due_date_key` | Dates |
+| `start_date_key`, `end_date_key`, `due_date_key` | Dates; `end_date_key` is empty for an open work order (D108) |
 | `product_key`, `scrap_reason_key` | Links; `-2` "No scrap" when nothing was scrapped |
 | `work_order_id` | Trace |
 | `order_qty`, `stocked_qty`, `scrapped_qty` | Quantities (stocked + scrapped = ordered) |
-| `days_to_finish`, `days_late`, `is_finished_late` | Timing |
-| `unit_cost`, `scrap_cost`, `cost_source` | Stored; scrap cost hidden while coverage is low (D46) |
+| `days_to_finish`, `days_late`, `is_finished_late` | Timing; `days_late` is 0 when on time (D108) |
+| `unit_cost`, `scrap_cost`, `cost_source` | Cost rule D110; scrap cost hidden while coverage is low and always shown with its coverage (D46) |
 
 ### 4.6 fact_inventory_current
 

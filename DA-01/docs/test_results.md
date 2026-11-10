@@ -168,3 +168,26 @@ Notes:
   took 2 seconds.
 - This run took about 4 minutes in total, while the earlier run took seconds. The cause was not
   identified; the results are not affected.
+
+---
+
+## B4b: Sales quota and work order facts
+
+**Script:** `tests/test_fact_quota_work_order.sql` | **Run:** 2026-11-10 (batch 4048) | **Result:** 6 of 6 passed (test 3 is information)
+
+| # | Test | Expected | Measured | Result |
+|---|---|---|---|---|
+| 1 | `fact_sales_quota` against staging and the quota checks | 19 checks equal | 19 of 19 (163 rows, 17 salespeople, 12 quota dates 2022-05-30 to 2025-02-28, quota total 95,714,000.00; territory source history 132, nearest 7 (salespeople 280 and 284, all Northwest), region from orders 24 (274 North America, 285 Pacific, 287 Europe), unknown 0; every period starts on its quota date and lasts 3 months; last period ends 2025-05-27) | Pass |
+| 2 | `fact_work_order` against staging and the work order checks | 26 checks equal | 26 of 26 (72,591 orders on 238 products; 4,507,721 ordered, 10,651 scrapped; 729 orders with scrap, 16 reasons; 22,790 finished late; 10 to 32 days to finish; due date always start + 11 days; cost source history 35,297, carried back 7,307, carried forward 6,439, standard cost 5,044 = staging; 0 starts in a gap; scrapped units with / without a cost 2,282 / 8,369) | Pass |
+| 3 | Work orders by cost source (information) | - | history 35,297 orders, 1,194 scrapped units; carried back 7,307, 502; carried forward 6,439, 440; standard cost 5,044, 146; unknown 18,504, 8,369 | - |
+| 4 | Lineage | 0 rows without lineage, 1 batch, both facts | 0 / 1 and 0 / 1 | Pass |
+| 5a | Empty quota staging is refused (D106, rolled back) | refused, 163, 163, 0 open transactions | refused / 163 / 163 / 0 | Pass |
+| 5b | Empty work order staging is refused (D106, rolled back) | refused, 72,591, 72,591, 0 open transactions | refused / 72,591 / 72,591 / 0 | Pass |
+| 6 | Re-run | Both Succeeded, 163 and 72,591 rows, 0 rows from other batches | As expected; 0 and 3 seconds | Pass |
+
+Notes:
+- In test 3 the unknown cost source shows a scrap cost total of 0.00: its 8,369 scrapped units have no
+  cost (stored as empty), and a sum skips empty values. Scrap cost must therefore always be shown with
+  its coverage (D46).
+- Standard cost covers 146 scrapped units: 143 on components with a standard cost and 3 on the two
+  finished goods without cost history, as in the work order checks.
