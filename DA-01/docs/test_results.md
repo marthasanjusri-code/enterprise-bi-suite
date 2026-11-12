@@ -230,3 +230,35 @@ Notes:
   measured 6. The code was right; D39's evidence (dim finance check 3b) covered USD units only. The 6
   rows are equity reclassifications for France, Germany and Australia that net to 0 per unit. D39 was
   corrected, D115 added, and the check replaced by three checks; the second run passed.
+
+---
+
+## B5: Pipeline, data quality checks, security users and Agent job
+
+**Script:** `tests/test_pipeline.sql` | **Run:** 2026-11-12 (batch 4078) | **Result:** 9 of 9 passed
+
+| # | Test | Expected | Measured | Result |
+|---|---|---|---|---|
+| 1 | Definitions | 27 checks, 9 Error, 18 Warning; 4 users, 1 Executive, 3 Regional Managers | 27, 9, 18; 4, 1, 3 | Pass |
+| 2 | A full run of `etl.run_pipeline` | Succeeded, 62 of 62 steps, 27 check results, 0 Fail, 0 Warn, no open transaction | As expected; 12 seconds | Pass |
+| 3 | Every check result of that run | 27 rows, all Pass | 27 Pass. E01-E09 all 0; W05 64, W06 2,151, W07 7, W08 534, W11 342 as their baselines; W12 21.43%, W13 93.51% coverage; all other warnings 0 | Pass |
+| 4 | Every fact comes from that run | Row counts as in B4a-B4d, 0 rows from other batches | sales 121,317; quota 163; work order 72,591; purchase 8,845; inventory 1,123; headcount 12,333; finance 39,409; 0 from other batches | Pass |
+| 5 | Failure path 1: an Error check fails (E07 expected value made impossible, then restored) | Run fails, batch Failed, E07 Fail, check results and log kept, 0 rows from the failed batch, sales still from the good batch, E07 restored to 0 | failed, Failed, Fail, 27 results and 63 log rows kept (62 steps + rollback row), 0, 121,317, 0, no open transaction | Pass |
+| 6 | Failure path 2: a step fails (territory map row pointing to a missing territory) | Run fails at `dim_organization` with the message kept, 0 rows from the failed batch, map restored | failed, Failed, dim_organization Failed, message kept, 1 check result (E01) kept, 0, 9 map rows, no open transaction | Pass |
+| 7 | Staging count check stops the run (D100), rolled back | Stopped, 1 table differs, details name it, staging restored | stopped, 1, "stg.aw_shift source 3 staging 2", 3 rows after rollback | Pass |
+| 8 | Security users (D71-D73, D117) | 3 checks PASS | 274 North America, 285 Pacific, 287 Europe; 0 users missing from `dim_employee`; 0 managers whose orders fall outside their region | Pass |
+| 9 | Agent job definition (D78) | Enabled, 1 step `EXEC etl.run_pipeline;` in EnterpriseBI_DW, daily at 02:00 | As expected (freq_type 4, interval 1, start 020000) | Pass |
+
+Notes:
+- The first run of this test (batch 4063, 11 Nov 2026) passed every check except one warning:
+  W03 measured 7 purchase lines shipped after their due date. A query showed all 7 were the 7 lines
+  whose due date is before the order date (W07, D45). W03 now skips those lines (D119); this run
+  measured 0.
+- W08 is "at most 534": every Pending (477) and Approved (57) line held received goods at build.
+- Real Agent run (11 Nov 2026): started with `sp_start_job`, job history "The job succeeded",
+  step executed as `NT SERVICE\SQLSERVERAGENT`, 14 seconds; batch 4068 Succeeded in 13 seconds with
+  `triggered_by` = `NT SERVICE\SQLSERVERAGENT`.
+- Run times: 112 s (batch 4063) and 21 s (batch 4064) on 11 Nov 2026, 13 s (Agent), 12 s (this run).
+  In the 112 s run the staging check step took 74 s; on its own it took 3 s. File autogrowth (about
+  130 ms in total, default trace) and overlapping runs (batch times) were ruled out. The cause was
+  not identified.

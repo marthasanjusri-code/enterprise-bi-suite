@@ -3,7 +3,7 @@
 How data moves from the two source databases to the Power BI report, how the load is scheduled
 and checked, and how access is controlled.
 
-Decision IDs (D01-D116) refer to [`decision_log.md`](decision_log.md).
+Decision IDs (D01-D119) refer to [`decision_log.md`](decision_log.md).
 
 ---
 
@@ -48,56 +48,84 @@ flowchart LR
 
 ## 2. Load process
 
-One SQL Server Agent job runs five steps. Each step is a stored procedure, so any scheduler
-(Agent today, Azure Data Factory optionally) can call the same logic (D09).
+One SQL Server Agent job, "EnterpriseBI_DW nightly load", runs one procedure: `etl.run_pipeline`.
+Each stage is a stored procedure, so any scheduler (Agent today, Azure Data Factory optionally)
+can call the same logic (D09).
 
 ```mermaid
 flowchart TD
-    A["1. etl.start_batch<br/>new row in etl.load_batch"] --> B["2. etl.load_staging<br/>truncate and reload stg tables"]
-    B --> C["3. etl.load_dimensions<br/>merge: update existing, insert new;<br/>surrogate keys stay stable"]
-    C --> D["4. etl.load_facts<br/>truncate and reload facts with all rules"]
-    D --> E["5. etl.run_quality_checks<br/>results to etl.dq_result"]
-    E -->|no errors| F["etl.end_batch: Succeeded<br/>row counts recorded"]
-    E -->|any error| G["etl.end_batch: Failed<br/>job stops, report keeps last good data"]
+    A["etl.start_batch<br/>new row in etl.load_batch"] --> T
+    subgraph T["One transaction (D118)"]
+        B["1. etl.load_staging<br/>truncate and reload 36 stg tables"]
+        B --> C["2. etl.check_staging_counts<br/>every staging count equals its source (D100)"]
+        C --> D["3. etl.load_dimensions<br/>17 dimensions: merge, surrogate keys stay stable"]
+        D --> E["4. etl.load_facts<br/>7 facts: truncate and reload with all rules"]
+        E --> F["5. etl.run_quality_checks<br/>27 checks to etl.dq_result"]
+    end
+    F -->|no Error check failed| G["COMMIT<br/>etl.end_batch: Succeeded"]
+    T -->|Error check failed or a step failed| H["ROLLBACK: warehouse stays as after the last good run<br/>log and check results written back<br/>etl.end_batch: Failed, job shows the error"]
 ```
 
 | Choice | Decision | Reason |
 |---|---|---|
 | Facts | Full reload every run (D76) | Largest source table has 121,317 rows; a full reload takes seconds and can never miss updates or deletes. Incremental loading by `ModifiedDate` is the documented next step if volumes grow. |
 | Dimensions | Merge (update + insert) (D76) | Surrogate keys stay stable between runs, so keys seen in earlier reports keep their meaning. |
-| Failures | Each step logs its result; an error stops the job (D77) | Half-loaded data never reaches the report. |
-| Schedule | Nightly at 02:00 (D78) | Outside working hours. |
+| Failures | All or nothing (D77, D118) | Any failed Error check or step rolls back the whole run, so half-loaded or broken data never reaches the report. The failed run's log and check results are kept. |
+| Staging check | Right after the staging load (D100) | A missing or short staging table stops the run before any dimension marks rows as no longer in the source. |
+| Schedule | Nightly at 02:00 (D78) | Outside working hours; tables are locked while the run's transaction is open. |
 
-`etl.load_batch` holds one row per run (start, end, status, who started it). `etl.load_log` holds
-one row per step: batch id, step, start and end time, rows read, rows written, status, error message.
+`etl.load_batch` holds one row per run (start, end, status, who started it: `SUSER_SNAME()`, which
+is `NT SERVICE\SQLSERVERAGENT` for the job). `etl.load_log` holds one row per step: batch id, step,
+start and end time, rows read, rows written, status, error message. A successful run writes 62
+steps: 1 staging load per table (36), the staging check, 17 dimensions, 7 facts and the quality
+checks.
 
 ---
 
 ## 3. Data quality checks
 
-Every run writes each check to `etl.dq_result` (batch id, check, severity, value, status).
-**Errors** stop the load; **warnings** are logged and shown on a data quality page (D77).
+Every run writes each check to `etl.dq_result` (batch id, check, value, status). The checks and
+their thresholds are rows in `etl.dq_check`, so a threshold changes without changing code (D119).
+A failed **Error** rolls the run back (D118); a failed **Warning** is logged as Warn and shown on a
+data quality page.
 
-| Check | Severity | Expected today | Source decision |
-|---|---|---|---|
-| Staging row counts equal source row counts, checked right after the staging load and before any dimension runs | Error | Equal | D10, D100 |
-| Fact rows with a missing date | Error | 0 | D22 |
-| Fact rows with key -1 (Unknown) where a value must exist | Error | 0 | D59 |
-| Purchase: ordered = accepted + rejected + short-delivered value, per line | Error | 0 failures | D42 |
-| Purchase: allocated freight = header freight, per order | Error | 0 failures | D44 |
-| Sales: line totals = order SubTotal | Error | 0 failures | D14 |
-| Sales: cost lookup finds more than one cost period | Error | 0 | D26 |
-| New order status values (sales or purchase) | Warning | 0 | D28 |
-| First late shipment (sales) or late vendor delivery | Warning | 0 | D18 |
-| Sales lines with estimated cost | Warning | 64 | D26 |
-| Lines on a discounted offer with no discount | Warning | 2,151 | D66 |
-| Purchase lines with due date before order date | Warning | 7 | D45 |
-| Lines on Pending or Approved purchase orders that already hold received goods | Warning | Up to 534 lines | D42 |
-| Quota rows with `territory_source` = unknown | Warning | 0 | D32 |
-| Salespeople with orders but no quota | Warning | 0 | D32 |
-| Corporate finance rows equal to their children's total | Warning | 342 | D35 |
-| Scrap cost coverage (% of scrapped units with a cost) | Warning | 21.4% | D46 |
-| Stock value coverage (% of stock units with a cost) | Warning | 93.5% | D53 |
+Each check has a rule, because 0 is good for some checks and poor for others:
+
+| Rule | Passes when | Used for |
+|---|---|---|
+| `at_most` | measured <= expected | Defect counts: lower is better, 0 = none allowed |
+| `equals` | measured = expected | Known, documented values: a change in either direction is flagged |
+| `at_least` | measured >= expected | Coverage percentages: higher is better |
+
+| Code | Check | Severity | Rule | Expected | Decision |
+|---|---|---|---|---|---|
+| E01 | Staging row counts that differ from the source (36 tables), checked before any dimension | Error | at_most | 0 | D10, D100 |
+| E02 | Facts whose row count differs from what their staging source implies | Error | at_most | 0 | D119 |
+| E03 | Fact rows with a required date missing (order, due, start, period) | Error | at_most | 0 | D22, D102, D108 |
+| E04 | Fact rows with key -1 (Unknown) where a value must exist | Error | at_most | 0 | D59 |
+| E05 | Purchase lines where ordered <> accepted + rejected + short-delivered value | Error | at_most | 0 | D42 |
+| E06 | Purchase orders whose allocated freight differs from the header freight | Error | at_most | 0 | D44 |
+| E07 | Sales orders whose line totals differ from SubTotal | Error | at_most | 0 | D14 |
+| E08 | Sales lines matching more than one cost period | Error | at_most | 0 | D26 |
+| E09 | Finance money rows without a USD amount (missing exchange rate) | Error | at_most | 0 | D36 |
+| W01 | Lines with a status not seen at design | Warning | at_most | 0 | D28, D104, D111 |
+| W02 | Sales lines shipped after their due date | Warning | at_most | 0 | D18 |
+| W03 | Purchase lines shipped after a valid due date (invalid due dates are in W07) | Warning | at_most | 0 | D43, D45 |
+| W04 | Rows with an optional date empty (unshipped orders, open work orders) | Warning | at_most | 0 | D102, D108 |
+| W05 | Sales lines with estimated cost | Warning | equals | 64 | D26 |
+| W06 | Sales lines on a discounted offer with no discount | Warning | equals | 2,151 | D66 |
+| W07 | Purchase lines with a due date before the order date | Warning | equals | 7 | D45 |
+| W08 | Pending or Approved purchase lines already holding received goods | Warning | at_most | 534 | D42 |
+| W09 | Quota rows with `territory_source` unknown | Warning | at_most | 0 | D32 |
+| W10 | Salespeople with orders but no quota | Warning | at_most | 0 | D32 |
+| W11 | Corporate finance rows equal to their children's total | Warning | equals | 342 | D35 |
+| W12 | Scrap cost coverage, % of scrapped units with a cost | Warning | at_least | 21.4 | D46 |
+| W13 | Stock value coverage, % of stock units with a cost | Warning | at_least | 93.5 | D53 |
+| W14 | Sales lines with no cost | Warning | at_most | 0 | D17, D26 |
+| W15 | Purchase lines received more than ordered | Warning | at_most | 0 | D42 |
+| W16 | Finance rows on units without a region group | Warning | at_most | 0 | D95 |
+| W17 | Region groups without a regional manager, or managers of a region that does not exist | Warning | at_most | 0 | D71, D73 |
+| W18 | Headcount rows without a pay rate | Warning | at_most | 0 | D55 |
 
 ---
 
@@ -133,8 +161,15 @@ flowchart LR
 - One dynamic role reads the user's email and filters `dim_territory` and `dim_organization` by
   the region group in `dw.security_user_region` (D71).
 - A user not in the table sees no data (D73).
-- Demo users: one manager each for North America, Europe and Pacific, tested with
+- Users (D117): four employees from the source, with their source email addresses, tested with
   "View as - Other user" in Power BI Desktop (D74).
+
+| User | Employee | Job title (source) | Role | Region group |
+|---|---|---|---|---|
+| ken0@adventure-works.com | 1 Ken Sánchez | Chief Executive Officer | Executive | All |
+| stephen0@adventure-works.com | 274 Stephen Jiang | North American Sales Manager | Regional Manager | North America |
+| syed0@adventure-works.com | 285 Syed Abbas | Pacific Sales Manager | Regional Manager | Pacific |
+| amy0@adventure-works.com | 287 Amy Alberts | European Sales Manager | Regional Manager | Europe |
 
 **Security tests (after the build)**
 
